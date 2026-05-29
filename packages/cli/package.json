@@ -7,7 +7,7 @@
   "types": "./dist/index.d.ts",
   "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
   "scripts": {
-    "build": "tsup src/index.ts src/cli.ts --format esm --dts --clean --external react --external ink",
+    "build": "tsup src/index.ts src/cli.ts --format esm --dts --clean --external react --external ink --external @anthropic-ai/sdk",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

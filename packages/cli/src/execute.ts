@@ -3,6 +3,7 @@ import type { AppDeps } from "./app.js";
 import { effectiveConcurrency, effectiveMaxAgents } from "./config.js";
 import { runWorkflow } from "./orchestrator.js";
 import type { RunStatus } from "./registry.js";
+import { formatError } from "./format-error.js";
 
 export interface ExecuteParams {
   readonly runId: string;
@@ -93,7 +94,7 @@ export async function runForeground(deps: AppDeps, params: ExecuteParams): Promi
   ui.unmount();
 
   if (result.isErr()) {
-    deps.print(`run ${status}: ${result.error.kind}\n`);
+    deps.print(`run ${status}: ${formatError(result.error)}\n`);
     return 1;
   }
   return 0;
