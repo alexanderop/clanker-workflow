@@ -13,20 +13,14 @@ export interface SandboxResult {
  * - TS is stripped by esbuild
  */
 export function transformScript(source: string): string {
-  // Rename `export const meta = …` to a plain `const meta = …` and inject a
-  // capture call IMMEDIATELY AFTER the meta declaration's terminating
-  // semicolon. We cannot append the capture to the end of the body because the
-  // workflow source ends with a top-level `return`, which makes any trailing
-  // statement unreachable dead code (esbuild keeps it but it never runs).
-  const metaDecl = /export\s+const\s+meta\s*=\s*([^;]+);/;
-  const match = metaDecl.exec(source);
-  if (!match) {
+  if (!/export\s+const\s+meta\s*=/.test(source)) {
     throw new Error("SandboxViolation: workflow script must export `const meta`");
   }
-  const safe = source.replace(
-    metaDecl,
-    `const meta = ${match[1]};\nglobalThis.__captureMeta(meta);`,
-  );
+  // Declare `const meta` (so the script body can reference it) AND mirror the same
+  // value onto a global for extraction — without needing to locate the end of the
+  // meta literal. Robust to multi-line literals, `as const`, semicolons inside
+  // strings, and a missing trailing semicolon.
+  const safe = source.replace(/export\s+const\s+meta\s*=\s*/, "const meta = globalThis.__meta = ");
   const wrapped = `(async () => {\n${safe}\n})()`;
   return transformSync(wrapped, { loader: "ts", format: "esm" }).code;
 }
@@ -53,7 +47,6 @@ export async function runInSandbox(
   globals: Record<string, unknown>,
 ): Promise<SandboxResult> {
   const js = transformScript(source);
-  let metaCaptured: SandboxResult["meta"] | undefined;
 
   const bannedMath = {
     ...Math,
@@ -62,13 +55,11 @@ export async function runInSandbox(
     },
   };
 
-  const context = vm.createContext({
+  const sandbox: Record<string, unknown> = {
     ...globals,
     Math: bannedMath,
     Date: makeBannedDate(),
-    __captureMeta: (m: SandboxResult["meta"]) => {
-      metaCaptured = m;
-    },
+    __meta: undefined,
     Promise,
     JSON,
     Array,
@@ -78,13 +69,15 @@ export async function runInSandbox(
     Boolean,
     Error,
     console,
-  });
+  };
 
+  const context = vm.createContext(sandbox);
   const script = new vm.Script(js, { filename: "workflow.js" });
   const returnValue = await script.runInContext(context);
 
-  if (!metaCaptured) {
+  const meta = sandbox.__meta as SandboxResult["meta"] | undefined;
+  if (!meta) {
     throw new Error("SandboxViolation: workflow script must export `const meta`");
   }
-  return { meta: metaCaptured, returnValue };
+  return { meta, returnValue };
 }

@@ -22,4 +22,19 @@ describe("sandbox", () => {
     const src = `export const meta = { name: "x", description: "", phases: [] };\n return Math.random();`;
     await expect(runInSandbox(src, {})).rejects.toThrow(/SandboxViolation|Math.random/);
   });
+
+  it("captures meta with no trailing semicolon (ASI)", async () => {
+    const src = `export const meta = { name: "n", description: "", phases: [] }\nreturn 1;`;
+    const result = await runInSandbox(src, {});
+    expect(result.meta.name).toBe("n");
+    expect(result.returnValue).toBe(1);
+  });
+
+  it("captures meta whose strings contain semicolons", async () => {
+    const src = `export const meta = { name: "n", description: "do a; then b", phases: [] };\nreturn 2;`;
+    const result = await runInSandbox(src, {});
+    expect(result.meta.name).toBe("n");
+    expect(result.meta.description).toBe("do a; then b");
+    expect(result.returnValue).toBe(2);
+  });
 });
