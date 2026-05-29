@@ -65,6 +65,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     const cached = deps.journal.lookup(mySeq);
     if (cached) {
       budget.record(cached.outputTokens);
+      deps.emit({ type: "agent-output", key, chunk: cached.text, at: deps.now() });
       deps.emit({ type: "agent-finished", key, usage: { inputTokens: 0, outputTokens: cached.outputTokens }, cached: true, at: deps.now() });
       return cached.data ?? cached.text;
     }
@@ -133,6 +134,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
 
       budget.record(res.usage.outputTokens);
       deps.journal.record({ seq: mySeq, key, text: res.text, data: res.data, outputTokens: res.usage.outputTokens });
+      deps.emit({ type: "agent-output", key, chunk: res.text, at: deps.now() });
       deps.emit({ type: "agent-finished", key, usage: res.usage, cached: false, at: deps.now() });
       return value;
     } finally {

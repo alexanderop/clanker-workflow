@@ -30,4 +30,14 @@ describe("event reducer", () => {
     const state = events.reduce(reduce, initialRunState());
     expect(state.agents.get("0")?.prompt).toBe("Search the web for X");
   });
+
+  it("accumulates agent-output chunks into resultText", () => {
+    const events: WorkflowEvent[] = [
+      { type: "agent-queued", key: "0", label: "a", phase: "P", at: 0 },
+      { type: "agent-output", key: "0", chunk: "hello ", at: 1 },
+      { type: "agent-output", key: "0", chunk: "world", at: 2 },
+    ];
+    const state = events.reduce(reduce, initialRunState());
+    expect(state.agents.get("0")?.resultText).toBe("hello world");
+  });
 });

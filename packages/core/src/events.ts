@@ -17,6 +17,7 @@ export type WorkflowEvent =
   | { readonly type: "agent-queued"; readonly key: string; readonly label: string; readonly phase: string; readonly prompt?: string; readonly at: number }
   | { readonly type: "agent-started"; readonly key: string; readonly at: number }
   | { readonly type: "agent-tool"; readonly key: string; readonly tool: ToolEvent; readonly at: number }
+  | { readonly type: "agent-output"; readonly key: string; readonly chunk: string; readonly at: number }
   | { readonly type: "agent-finished"; readonly key: string; readonly usage: AgentUsage; readonly cached: boolean; readonly at: number }
   | { readonly type: "agent-failed"; readonly key: string; readonly error: WorkflowError; readonly at: number }
   | { readonly type: "log"; readonly message: string; readonly at: number }
@@ -116,6 +117,13 @@ export function reduce(state: RunState, event: WorkflowEvent): RunState {
       if (!a) return state;
       const agents = new Map(state.agents);
       agents.set(event.key, { ...a, tools: [...a.tools, event.tool] });
+      return { ...state, agents };
+    }
+    case "agent-output": {
+      const a = state.agents.get(event.key);
+      if (!a) return state;
+      const agents = new Map(state.agents);
+      agents.set(event.key, { ...a, resultText: a.resultText + event.chunk });
       return { ...state, agents };
     }
     case "agent-finished": {

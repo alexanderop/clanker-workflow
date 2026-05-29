@@ -49,7 +49,7 @@ describe("runtime.agent", () => {
     rt.phase("Search");
     await rt.agent("p", { label: "a" });
     const types = events.map((e) => e.type);
-    expect(types).toEqual(["phase-started", "agent-queued", "agent-started", "agent-finished"]);
+    expect(types).toEqual(["phase-started", "agent-queued", "agent-started", "agent-output", "agent-finished"]);
   });
 
   it("throws when the runner fails, so parallel can null it", async () => {
