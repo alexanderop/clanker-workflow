@@ -63,18 +63,20 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     }
 
     // Budget gate (parity: further agent() calls throw once spent reaches total).
+    // Best-effort gate: under concurrency spend may overshoot total by up to (concurrency × per-agent tokens). Spec defines budget as a gate, not a hard reservation.
     if (deps.budgetTotal !== null && budget.remaining() <= 0) {
       const e: WorkflowError = { kind: "BudgetExhausted", spent: budget.spent(), total: deps.budgetTotal };
       deps.emit({ type: "agent-failed", key, error: e, at: deps.now() });
       throw new WorkflowThrow(e);
     }
 
-    // Agent cap.
+    // Agent cap — claim the slot synchronously so concurrent launches can't overshoot.
     if (spawned >= deps.maxAgents) {
       const e: WorkflowError = { kind: "AgentCapExceeded", cap: deps.maxAgents };
       deps.emit({ type: "agent-failed", key, error: e, at: deps.now() });
       throw new WorkflowThrow(e);
     }
+    spawned++;
 
     let jsonSchema: Record<string, unknown> | undefined;
     if (opts.schema) {
@@ -88,9 +90,9 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     }
 
     const release = await deps.semaphore.acquire();
-    spawned++;
     deps.emit({ type: "agent-started", key, at: deps.now() });
     try {
+      // Signal wired for Plan 2 stop/restart; never aborted in Plan 1.
       const controller = new AbortController();
       const request: AgentRequest = {
         prompt,
