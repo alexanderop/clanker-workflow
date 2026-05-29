@@ -4,7 +4,7 @@ export default defineWorkspace([
   {
     test: {
       name: "unit",
-      include: ["packages/*/src/**/*.test.ts"],
+      include: ["packages/*/src/**/*.test.ts", "packages/*/src/**/*.test.tsx"],
       exclude: ["**/*.e2e.test.ts"],
     },
   },
