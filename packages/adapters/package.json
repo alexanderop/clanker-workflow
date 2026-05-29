@@ -13,7 +13,9 @@
     "@workflow/core": "workspace:*",
     "@workflow/schema": "workspace:*",
     "ajv": "^8.17.0",
-    "neverthrow": "^8.1.0",
+    "neverthrow": "^8.1.0"
+  },
+  "devDependencies": {
     "zod": "^4.0.0"
   },
   "optionalDependencies": {

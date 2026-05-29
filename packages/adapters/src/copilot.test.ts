@@ -34,4 +34,15 @@ describe("copilot adapter", () => {
     expect(res._unsafeUnwrapErr().kind).toBe("SchemaValidation");
     expect(n).toBe(2);
   });
+
+  it("returns AdapterSpawn (does not throw) when the CLI exits non-zero", async () => {
+    const fake = createFakeProcessRunner({ copilot: { stdout: "", stderr: "boom", code: 1 } });
+    const adapter = createCopilotAdapter({ processRunner: fake });
+    const res = await adapter.run(
+      { prompt: "give n", schema: { type: "object", properties: { n: { type: "number" } }, required: ["n"], additionalProperties: false }, cwd: "/tmp", signal: new AbortController().signal },
+      { runId: "r", seq: 0 },
+    );
+    expect(res.isErr()).toBe(true);
+    expect(res._unsafeUnwrapErr().kind).toBe("AdapterSpawn");
+  });
 });
