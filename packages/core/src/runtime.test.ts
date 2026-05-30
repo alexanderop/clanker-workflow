@@ -58,6 +58,37 @@ describe("runtime.agent", () => {
   });
 });
 
+describe("resolveRunner: per-call adapter dispatch", () => {
+  it("routes to runnerB when adapter matches, and falls back to default runner for unknown id", async () => {
+    const events: WorkflowEvent[] = [];
+    const runnerA = createScriptedRunner({ x: { text: "from-a" } });
+    const runnerB = createScriptedRunner({ x: { text: "from-b" } });
+    const rt = createRuntime({
+      runner: runnerA,
+      semaphore: createSemaphore(8),
+      journal: createJournal(),
+      maxAgents: 1000,
+      budgetTotal: null,
+      args: {},
+      cwd: "/tmp",
+      runId: "r1",
+      emit: (e) => events.push(e),
+      now: () => 0,
+      resolveRunner: (id) => (id === "b" ? runnerB : undefined),
+    });
+
+    // adapter "b" → runnerB
+    await rt.agent("p", { label: "x", adapter: "b" });
+    expect(runnerB.callCount()).toBe(1);
+    expect(runnerA.callCount()).toBe(0);
+
+    // unknown adapter "zzz" → falls back to runnerA
+    await rt.agent("p", { label: "x", adapter: "zzz" });
+    expect(runnerA.callCount()).toBe(1);
+    expect(runnerB.callCount()).toBe(1);
+  });
+});
+
 describe("runtime stop/pause hooks", () => {
   it("an already-aborted signal rejects agent() without invoking the runner", async () => {
     const events: WorkflowEvent[] = [];

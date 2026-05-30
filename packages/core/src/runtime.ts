@@ -34,6 +34,8 @@ export interface RuntimeDeps {
   readonly emit: (event: WorkflowEvent) => void;
   readonly now: () => number;
   readonly resolveWorkflow?: (name: string, args?: unknown) => Promise<LoadedWorkflow>;
+  /** Per-call adapter dispatch: return a runner for the given adapter id, or undefined to fall back to deps.runner. */
+  readonly resolveRunner?: ((id: string) => AgentRunner | undefined) | undefined;
   /** Run-scoped stop: when aborted, in-flight adapter processes are killed and new agent() calls short-circuit. */
   readonly signal?: AbortSignal | undefined;
   /** Pause gate: awaited before each agent acquires the semaphore (resolves immediately when not paused). */
@@ -129,7 +131,8 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         ...(opts.model ? { model: opts.model } : {}),
         ...(opts.agentType ? { agentType: opts.agentType } : {}),
       };
-      const result = await deps.runner.run(request, { runId: deps.runId, seq: mySeq });
+      const runner = opts.adapter ? (deps.resolveRunner?.(opts.adapter) ?? deps.runner) : deps.runner;
+      const result = await runner.run(request, { runId: deps.runId, seq: mySeq });
 
       if (result.isErr()) {
         deps.emit({ type: "agent-failed", key, error: result.error, at: deps.now() });
