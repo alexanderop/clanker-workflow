@@ -9,7 +9,7 @@ on-disk pair that powers `watch`, `resume`, and `save`.
 ## Commands
 
 ```bash
-defineworkflow run <script> [--args '{...}'] [--detach] [--yes]
+defineworkflow run <script> [--args '{...}'] [--detach] [--yes] [--answers '{...}']
 defineworkflow watch <id>            # attach the UI to a running/finished run
 defineworkflow list                  # list runs (status, tokens, elapsed)
 defineworkflow resume <id>           # replay the journal, run the rest live
@@ -44,6 +44,23 @@ defineworkflow watch <id>
 see [Journal & resume](/guide/journal-resume). `defineworkflow save <id>` promotes a run's script to a named
 workflow you can later invoke as `defineworkflow <name>`. The optional `whenToUse` meta hint, if set, is
 shown alongside each entry in the saved/bundled workflow listing.
+
+## Asking questions headlessly
+
+When a workflow calls [`askUserQuestion()`](/guide/#asking-the-human-a-question), a foreground TTY run
+renders an interactive prompt. A **headless** run (non-TTY, CI, or `--detach`) can't prompt, so it
+resolves each answer in this order:
+
+1. The `--answers` map, keyed by the question's `key`:
+   ```bash
+   defineworkflow run ./deploy.workflow.ts --detach --answers '{ "deploy-target": "production" }'
+   ```
+2. Otherwise the question's own `default`.
+3. Otherwise the run **fails fast** with an error naming the unanswered key — it never silently hangs.
+
+The `--answers` map is threaded onto the run meta, so a `--detach`ed child reads it back. `watch` stays
+read-only: it shows asked/answered questions in the event stream but does not answer them — that's the
+`--answers` path's job.
 
 ## Configuration
 

@@ -67,8 +67,8 @@ resumes from the longest unchanged prefix without re-invoking the model.
 
 ## The primitives
 
-You import these from the `workflow` package for autocomplete and compile-time checks; at run time the
-engine strips that import and injects the live runtime values into your sandbox:
+You import these from the `defineworkflow` package for autocomplete and compile-time checks; at run time
+the engine strips that import and injects the live runtime values into your sandbox:
 
 | Primitive | What it does |
 |---|---|
@@ -78,6 +78,7 @@ engine strips that import and injects the live runtime values into your sandbox:
 | `phase(title)` | Group subsequent agents under a named phase (drives the progress UI). |
 | `log(message)` | Emit a log line into the event stream. |
 | `workflow(name, args?)` | Run another workflow inline (one level deep; shares the parent budget). |
+| `askUserQuestion(opts)` | **Pause and ask the human** a markdown question mid-run; returns their answer as a `string`. Journaled like an agent result, so resume never re-asks. |
 | `args` / `budget` | The run's input value, and the soft token-budget gate. |
 
 ## A first workflow
@@ -114,6 +115,45 @@ Two things make this honest engineering rather than a prompt toy:
 - **The script must be deterministic.** That's enforced by the [sandbox](/guide/sandbox): `Date.now()`,
   `Math.random()`, and argless `new Date()` are hard-banned, because replay depends on the same calls
   happening in the same order.
+
+## Asking the human a question
+
+Sometimes a run needs a decision only a human can make — which environment to deploy to, which of two
+drafts to keep. `askUserQuestion()` pauses the run, renders a markdown question in the terminal, and
+returns the answer as a `string`. Because the question text is built from whatever's in scope, it's
+naturally *a function of current state*:
+
+```ts
+import { agent, askUserQuestion, defineWorkflow, phase } from "defineworkflow"
+
+export default defineWorkflow({
+  name: "deploy",
+  description: "Ask where to ship, then ship there",
+  harness: "claude",
+
+  async run() {
+    const target = await askUserQuestion({
+      key: "deploy-target",                 // stable key — used for --answers and the journal
+      question: "## Where to deploy?\nPick the target environment.",
+      choices: ["staging", "production"],   // arrow-key selectable
+      allowOther: true,                      // adds an "Other → type your own" free-text path
+      default: "staging",                    // used in non-interactive runs
+    })
+
+    return agent(`Deploy to ${target}.`)
+  },
+})
+```
+
+The answer is **journaled by sequence number**, exactly like an `agent()` result — so a resumed or
+replayed run returns the cached answer instead of re-prompting. The call shares the agent seq counter
+and skips the budget/cap gates (a question costs no tokens). Questions raised concurrently inside
+`parallel()` / `pipeline()` are serialized behind one lock so only one prompt owns the keyboard at a
+time; in-flight agents keep running.
+
+**Headless runs never hang.** With no TTY (CI, `--detach`, non-interactive), the answer is resolved
+from the [`--answers`](/cli#asking-questions-headlessly) map, then the question's `default`, and if
+neither matches the run fails fast rather than blocking on input.
 
 ## Where to go next
 

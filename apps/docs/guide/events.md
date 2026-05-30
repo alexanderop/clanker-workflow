@@ -42,6 +42,8 @@ type WorkflowEvent =
   | { type: "agent-output"; key; chunk; at }
   | { type: "agent-finished"; key; usage; cached; at }
   | { type: "agent-failed"; key; error; at }
+  | { type: "question-asked"; key; question; choices?; allowOther?; at }
+  | { type: "question-answered"; key; answer; cached; at }
   | { type: "log"; message; at }
   | { type: "run-finished"; runId; at }
 ```
