@@ -1,74 +1,17 @@
 import { describe, it, expect } from "vitest";
-import { startUi } from "@workflow/ui";
 import { ok, err } from "neverthrow";
 import type { Result } from "neverthrow";
 import type { AgentRunner, AgentRequest, AgentResult, RunCtx, WorkflowError } from "@workflow/core";
-import type { AppDeps } from "../app.js";
-import { createRegistry, type RegistryFs } from "../registry.js";
+import { agentResult, workflowSource } from "@workflow/test-support";
 import { dispatch } from "../dispatch.js";
 import { runForeground } from "../execute.js";
+import { fakeDeps, runMeta } from "../test-support.js";
 
-function memFs(seed: Record<string, string> = {}): RegistryFs & { files: Map<string, string> } {
-  const files = new Map<string, string>(Object.entries(seed));
-  const dirs = new Set<string>();
-  return {
-    files,
-    mkdirp: (dir) => dirs.add(dir),
-    writeFile: (p, data) => files.set(p, data),
-    appendFile: (p, data) => files.set(p, (files.get(p) ?? "") + data),
-    readFile: (p) => files.get(p),
-    readDir: (dir) => [...dirs].filter((d) => d.startsWith(dir + "/")).map((d) => d.slice(dir.length + 1).split("/")[0]!),
-    exists: (p) => files.has(p) || dirs.has(p),
-  };
-}
-
-function fakeDeps(overrides: Partial<AppDeps> = {}): { deps: AppDeps; out: () => string } {
-  const fs = memFs((overrides as { _files?: Record<string, string> })._files ?? {});
-  let out = "";
-  let clock = 1000;
-  const base: AppDeps = {
-    registry: createRegistry({ root: "/runs", fs }),
-    config: {},
-    cwd: "/proj",
-    homeDir: "/home/me",
-    tmpDir: "/tmp/wt",
-    cores: 12,
-    env: {},
-    isTTY: false,
-    ci: false,
-    now: () => clock++,
-    rand: () => 0.5,
-    pid: () => 4242,
-    hash: (s) => `h:${s.length}`,
-    processRunner: { run: async () => ({ code: 0, stdout: "", stderr: "" }) },
-    complete: async () => ({ text: "agent-said-hi", usage: { inputTokens: 1, outputTokens: 5 } }),
-    detected: [],
-    readTextFile: (p) => fs.readFile(p),
-    writeTextFile: (p, data) => fs.writeFile(p, data),
-    print: (t) => {
-      out += t;
-    },
-    bundledDir: "/bundled",
-    startUi,
-    consentIO: { question: async () => "n", write: () => {} },
-    persistConsent: () => {},
-    spawnDetached: () => 9999,
-    killProcess: () => {},
-    onSigterm: () => {},
-    watchEvents: () => () => {},
-  };
-  return { deps: { ...base, ...overrides }, out: () => out };
-}
-
-const HELLO = `export const meta = { name: "hello", description: "say hi", harness: "raw-api", phases: [{ title: "Greet" }] } as const
-phase("Greet");
+const GREET_BODY = `phase("Greet");
 const msg = await agent("say hi", { label: "greeter" });
 return { msg };`;
-
-const HELLO_NO_HARNESS = `export const meta = { name: "hello", description: "say hi", phases: [{ title: "Greet" }] } as const
-phase("Greet");
-const msg = await agent("say hi", { label: "greeter" });
-return { msg };`;
+const HELLO = workflowSource({ name: "hello", description: "say hi", harness: "raw-api", phases: [{ title: "Greet" }], body: GREET_BODY });
+const HELLO_NO_HARNESS = workflowSource({ name: "hello", description: "say hi", phases: [{ title: "Greet" }], body: GREET_BODY });
 
 describe("dispatch routing", () => {
   it("prints usage and exits non-zero with no command", async () => {
@@ -103,13 +46,13 @@ describe("dispatch routing", () => {
   });
 
   it("run rejects invalid --args JSON", async () => {
-    const { deps } = fakeDeps({ _files: { "/h.ts": HELLO } } as Partial<AppDeps>);
+    const { deps } = fakeDeps({ _files: { "/h.ts": HELLO } });
     const code = await dispatch(["run", "/h.ts", "--args", "{bad", "--yes"], deps);
     expect(code).toBe(1);
   });
 
   it("run errors when meta.harness is not declared", async () => {
-    const { deps, out } = fakeDeps({ _files: { "/h.ts": HELLO_NO_HARNESS } } as Partial<AppDeps>);
+    const { deps, out } = fakeDeps({ _files: { "/h.ts": HELLO_NO_HARNESS } });
     const code = await dispatch(["run", "/h.ts", "--yes"], deps);
     expect(code).toBe(1);
     expect(out()).toContain("HarnessNotDeclared");
@@ -118,19 +61,7 @@ describe("dispatch routing", () => {
 
 describe("dispatch run (end-to-end, line-log)", () => {
   it("runs a workflow via the raw-api adapter and persists a finished run", async () => {
-    const fs = memFs({ "/h.ts": HELLO });
-    let out = "";
-    let clock = 0;
-    const deps: AppDeps = {
-      ...fakeDeps().deps,
-      registry: createRegistry({ root: "/runs", fs }),
-      readTextFile: (p) => fs.readFile(p),
-      writeTextFile: (p, d) => fs.writeFile(p, d),
-      now: () => clock++,
-      print: (t) => {
-        out += t;
-      },
-    };
+    const { deps, out } = fakeDeps({ _files: { "/h.ts": HELLO } });
 
     const code = await dispatch(["run", "/h.ts", "--yes"], deps);
     expect(code).toBe(0);
@@ -141,8 +72,8 @@ describe("dispatch run (end-to-end, line-log)", () => {
     expect(runs[0]!.status).toBe("finished");
     expect(runs[0]!.adapter).toBe("raw-api");
     // line-log output records the run + the finished agent
-    expect(out).toContain("hello");
-    expect(out).toContain("greeter");
+    expect(out()).toContain("hello");
+    expect(out()).toContain("greeter");
   });
 });
 
@@ -182,7 +113,7 @@ function createControllableRunner(): ControllableRunner {
     resolve: (label, text) => {
       const s = pending.get(label);
       const d = s?.[s.length - 1];
-      if (d) d.resolve(ok({ text, data: undefined, usage: { inputTokens: 0, outputTokens: 0 }, toolCalls: [] }));
+      if (d) d.resolve(ok(agentResult({ text })));
     },
   };
 }
@@ -197,15 +128,14 @@ return r;`;
 
     let onAction!: (a: import("@workflow/ui").UiAction) => void;
     const { deps } = fakeDeps({
-      startUi: (opts) => {
-        onAction = opts.onAction!;
-        return { unmount() {} };
+      ui: {
+        start: (opts) => {
+          onAction = opts.onAction!;
+          return { unmount() {} };
+        },
       },
     });
-    deps.registry.init(
-      { runId: "r1", name: "t", scriptPath: null, args: {}, adapter: "codex", status: "running", startedAt: 0, endedAt: null, pid: null, scriptHash: "h" },
-      SOURCE,
-    );
+    deps.registry.init(runMeta({ runId: "r1", name: "t" }), SOURCE);
 
     const runner = createControllableRunner();
     const p = runForeground(deps, { runId: "r1", source: SOURCE, args: {}, runner, adapter: "codex", seed: [] });
@@ -232,15 +162,14 @@ return v;`;
 
     let onAction!: (a: import("@workflow/ui").UiAction) => void;
     const { deps } = fakeDeps({
-      startUi: (opts) => {
-        onAction = opts.onAction!;
-        return { unmount() {} };
+      ui: {
+        start: (opts) => {
+          onAction = opts.onAction!;
+          return { unmount() {} };
+        },
       },
     });
-    deps.registry.init(
-      { runId: "r2", name: "t", scriptPath: null, args: {}, adapter: "codex", status: "running", startedAt: 0, endedAt: null, pid: null, scriptHash: "h" },
-      SOURCE2,
-    );
+    deps.registry.init(runMeta({ runId: "r2", name: "t" }), SOURCE2);
 
     const runner = createControllableRunner();
     const p = runForeground(deps, { runId: "r2", source: SOURCE2, args: {}, runner, adapter: "codex", seed: [] });

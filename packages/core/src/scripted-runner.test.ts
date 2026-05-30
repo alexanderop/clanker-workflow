@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { agentRequest, runCtx } from "@workflow/test-support";
 import { createScriptedRunner } from "./scripted-runner.js";
 
 describe("ScriptedRunner", () => {
@@ -6,11 +7,7 @@ describe("ScriptedRunner", () => {
     const runner = createScriptedRunner({
       "research:a": { text: "found A", data: { items: 1 }, outputTokens: 12 },
     });
-    const ctrl = new AbortController();
-    const res = await runner.run(
-      { prompt: "p", cwd: "/tmp", signal: ctrl.signal, label: "research:a" },
-      { runId: "r", seq: 0 },
-    );
+    const res = await runner.run(agentRequest({ label: "research:a" }), runCtx());
     expect(res.isOk()).toBe(true);
     const r = res._unsafeUnwrap();
     expect(r.text).toBe("found A");
@@ -20,9 +17,8 @@ describe("ScriptedRunner", () => {
 
   it("tracks peak concurrency via inFlight()", async () => {
     const runner = createScriptedRunner({}, { delayMs: 10 });
-    const ctrl = new AbortController();
     const reqs = Array.from({ length: 3 }, (_, i) =>
-      runner.run({ prompt: "p", cwd: "/tmp", signal: ctrl.signal, label: `x${i}` }, { runId: "r", seq: i }),
+      runner.run(agentRequest({ label: `x${i}` }), runCtx({ seq: i })),
     );
     await new Promise((r) => setTimeout(r, 2));
     expect(runner.inFlight()).toBe(3);

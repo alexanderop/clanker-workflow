@@ -21,6 +21,7 @@
     "neverthrow": "^8.1.0"
   },
   "devDependencies": {
+    "@workflow/test-support": "workspace:*",
     "zod": "^4.0.0"
   },
   "optionalDependencies": {

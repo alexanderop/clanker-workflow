@@ -20,13 +20,16 @@ const tryRead = (p: string): string | undefined => {
   }
 };
 
+/** Write a file, creating its parent directory first — the one place this pattern lives. */
+const writeFileEnsured = (p: string, data: string): void => {
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+  fs.writeFileSync(p, data);
+};
+
 function makeNodeFs(): RegistryFs {
   return {
     mkdirp: (dir) => void fs.mkdirSync(dir, { recursive: true }),
-    writeFile: (p, data) => {
-      fs.mkdirSync(path.dirname(p), { recursive: true });
-      fs.writeFileSync(p, data);
-    },
+    writeFile: writeFileEnsured,
     appendFile: (p, data) => {
       fs.mkdirSync(path.dirname(p), { recursive: true });
       fs.appendFileSync(p, data);
@@ -70,8 +73,7 @@ function persistConsent(homeDir: string, project: string, name: string): void {
   }
   const consents: Record<string, Record<string, boolean>> = { ...config.consents };
   consents[project] = { ...consents[project], [name]: true };
-  fs.mkdirSync(path.dirname(configPath), { recursive: true });
-  fs.writeFileSync(configPath, JSON.stringify({ ...config, consents }, null, 2));
+  writeFileEnsured(configPath, JSON.stringify({ ...config, consents }, null, 2));
 }
 
 /** Build the real, effectful AppDeps wired to the host (fs / process / Ink / harnesses). */
@@ -79,50 +81,61 @@ export async function buildNodeDeps(cliPath: string): Promise<AppDeps> {
   const homeDir = os.homedir();
   const cwd = process.cwd();
   const cores = os.cpus().length;
-  const env = process.env;
+  const vars = process.env;
   const nodeFs = makeNodeFs();
   const registry = createRegistry({ root: path.join(homeDir, ".workflow", "runs"), fs: nodeFs });
-  const config = loadConfig({ readFile: tryRead, homeDir, cwd, cores, env });
+  const config = loadConfig({ readFile: tryRead, homeDir, cwd, cores, env: vars });
   const detected = await detectAdapters();
-  const complete = createAnthropicComplete(env["ANTHROPIC_API_KEY"], config.adapters?.["raw-api"]?.model);
+  const complete = createAnthropicComplete(vars["ANTHROPIC_API_KEY"], config.adapters?.["raw-api"]?.model);
 
   return {
     registry,
     config,
-    cwd,
-    homeDir,
-    tmpDir: path.join(os.tmpdir(), "workflow-worktrees"),
-    bundledDir: path.resolve(path.dirname(cliPath), "..", "..", "..", "examples"),
-    cores,
-    env,
-    isTTY: Boolean(process.stdout.isTTY),
-    ci: env["CI"] === "true" || env["CI"] === "1",
-    now: () => Date.now(),
-    rand: () => Math.random(),
-    pid: () => process.pid,
-    hash: (s) => crypto.createHash("sha256").update(s).digest("hex"),
-    processRunner: createProcessRunner(),
-    ...(complete ? { complete } : {}),
-    detected,
-    readTextFile: tryRead,
-    writeTextFile: (p, data) => {
-      fs.mkdirSync(path.dirname(p), { recursive: true });
-      fs.writeFileSync(p, data);
+    clock: {
+      now: () => Date.now(),
+      rand: () => Math.random(),
+      pid: () => process.pid,
+      hash: (s) => crypto.createHash("sha256").update(s).digest("hex"),
     },
-    print: (text) => void process.stdout.write(text),
-    startUi,
-    consentIO: makeReadlineIO(),
-    persistConsent: (project, name) => persistConsent(homeDir, project, name),
-    spawnDetached: (runId) => {
-      const child = spawn(process.execPath, [cliPath, "__run-detached", runId], { detached: true, stdio: "ignore" });
-      child.unref();
-      return child.pid ?? 0;
+    env: {
+      cwd,
+      homeDir,
+      tmpDir: path.join(os.tmpdir(), "workflow-worktrees"),
+      bundledDir: path.resolve(path.dirname(cliPath), "..", "..", "..", "examples"),
+      cores,
+      vars,
+      isTTY: Boolean(process.stdout.isTTY),
+      ci: vars["CI"] === "true" || vars["CI"] === "1",
     },
-    killProcess: (pid, signal) => void process.kill(pid, signal),
-    onSigterm: (handler) => void process.on("SIGTERM", handler),
-    watchEvents: (runId, onChange) => {
-      const watcher = fs.watch(registry.runDir(runId), () => onChange());
-      return () => watcher.close();
+    io: {
+      readText: tryRead,
+      writeText: writeFileEnsured,
+    },
+    adapters: {
+      processRunner: createProcessRunner(),
+      detected,
+      ...(complete ? { complete } : {}),
+    },
+    ui: {
+      start: startUi,
+      print: (text) => void process.stdout.write(text),
+    },
+    consent: {
+      io: makeReadlineIO(),
+      persist: (project, name) => persistConsent(homeDir, project, name),
+    },
+    proc: {
+      spawnDetached: (runId) => {
+        const child = spawn(process.execPath, [cliPath, "__run-detached", runId], { detached: true, stdio: "ignore" });
+        child.unref();
+        return child.pid ?? 0;
+      },
+      kill: (pid, signal) => void process.kill(pid, signal),
+      onSigterm: (handler) => void process.on("SIGTERM", handler),
+      watchEvents: (runId, onChange) => {
+        const watcher = fs.watch(registry.runDir(runId), () => onChange());
+        return () => watcher.close();
+      },
     },
   };
 }

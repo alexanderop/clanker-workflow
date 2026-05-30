@@ -1,10 +1,10 @@
 import { describe, it, expect } from "vitest";
 import { createMockRunner } from "@workflow/core";
 import type { WorkflowEvent } from "@workflow/core";
-import type { StartUiOptions } from "@workflow/ui";
+import type { ProcessRunner } from "@workflow/adapters";
 import { createRegistry, type RegistryFs, type RunMeta } from "./registry.js";
 import { runForeground } from "./execute.js";
-import type { AppDeps } from "./app.js";
+import { fakeDeps as makeFakeDeps } from "./test-support.js";
 
 function memRegistryFs(): RegistryFs {
   const files = new Map<string, string>();
@@ -19,46 +19,26 @@ function memRegistryFs(): RegistryFs {
 }
 
 // A throwing ProcessRunner proves a --mock run never spawns a real CLI.
-const explodingProcessRunner = {
+const explodingProcessRunner: ProcessRunner = {
   run: () => {
     throw new Error("processRunner must not be called during a --mock run");
   },
 };
 
-function fakeDeps(registry: ReturnType<typeof createRegistry>, events: WorkflowEvent[]): AppDeps {
-  return {
+/** A fake AppDeps whose UI forwards every event to `events`, with adapters that explode if spawned. */
+function fakeDeps(registry: ReturnType<typeof createRegistry>, events: WorkflowEvent[]) {
+  return makeFakeDeps({
     registry,
-    config: {},
-    cwd: "/tmp",
-    homeDir: "/tmp/home",
-    tmpDir: "/tmp/tmp",
-    cores: 4,
-    env: {},
-    isTTY: false,
-    ci: true,
-    now: () => 0,
-    rand: () => 0,
-    pid: () => 1,
-    hash: () => "h",
-    processRunner: explodingProcessRunner as AppDeps["processRunner"],
     // codex IS detected — so without --mock, the per-call `adapter: "codex"` override
     // would resolve to the real codex adapter and hit the exploding processRunner.
-    detected: ["codex"],
-    readTextFile: () => undefined,
-    writeTextFile: () => {},
-    print: () => {},
-    bundledDir: "/tmp/bundled",
-    startUi: (opts: StartUiOptions) => {
-      opts.subscribe((e: WorkflowEvent) => events.push(e));
-      return { unmount: () => {} };
+    adapters: { processRunner: explodingProcessRunner, detected: ["codex"] },
+    ui: {
+      start: (opts) => {
+        opts.subscribe((e: WorkflowEvent) => events.push(e));
+        return { unmount: () => {} };
+      },
     },
-    consentIO: { question: async () => "", write: () => {} },
-    persistConsent: () => {},
-    spawnDetached: () => 1,
-    killProcess: () => {},
-    onSigterm: () => {},
-    watchEvents: () => () => {},
-  } as unknown as AppDeps;
+  }).deps;
 }
 
 const SOURCE = `
@@ -110,7 +90,8 @@ describe("runForeground with --mock", () => {
     registry.init(meta, SOURCE);
     const events: WorkflowEvent[] = [];
     const prints: string[] = [];
-    const deps = { ...fakeDeps(registry, events), print: (t: string) => void prints.push(t) } as AppDeps;
+    const base = fakeDeps(registry, events);
+    const deps = { ...base, ui: { ...base.ui, print: (t: string) => void prints.push(t) } };
 
     await runForeground(deps, { runId, source: SOURCE, args: null, runner: createMockRunner(), adapter: "mock", seed: [], mock: true });
 

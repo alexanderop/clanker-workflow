@@ -84,7 +84,7 @@ d("real-CLI e2e per installed adapter (costs tokens; WORKFLOW_E2E=1)", () => {
       expect(calls2).toBe(0);
 
       let printed = "";
-      adaptersCommand({ detected: present, print: (t: string) => { printed += t; } } as unknown as AppDeps);
+      adaptersCommand({ adapters: { detected: present }, ui: { print: (t: string) => { printed += t; } } } as unknown as Pick<AppDeps, "adapters" | "ui">);
       expect(printed).toContain(id);
 
       fs.rmSync(root, { recursive: true, force: true });

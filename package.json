@@ -21,6 +21,7 @@
     "test:e2e": "WORKFLOW_E2E=1 vitest run --project e2e",
     "newsletter": "pnpm --filter @workflow/newsletter build && pnpm --filter @workflow/examples vue-newsletter",
     "example": "pnpm -r build && pnpm --filter @workflow/examples haiku",
+    "question": "pnpm -r build && pnpm --filter @workflow/examples question",
     "prepare": "lefthook install"
   },
   "devDependencies": {

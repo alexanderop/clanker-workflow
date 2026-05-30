@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { reduce, initialRunState, type WorkflowEvent, type AgentState } from "@workflow/core";
+import { event, usage } from "@workflow/test-support";
 import {
   orderedPhases,
   agentsInPhase,
@@ -13,16 +14,19 @@ import {
   elapsedMs,
 } from "./selectors.js";
 
+// All agent events share the factory's default key, so they link into one agent — only the
+// fields each assertion cares about (timeline `at`, label/phase, tokens, tool, chunk) are spelled out.
+const MODEL = "claude-opus-4-8[1m]";
 const events: WorkflowEvent[] = [
-  { type: "run-started", runId: "r1", name: "demo", at: 100 },
-  { type: "phase-started", phase: "Scope", at: 110 },
-  { type: "phase-started", phase: "Search", at: 120 },
-  { type: "agent-queued", key: "k0", label: "angle-0", phase: "Search", prompt: "find a\nfind b", at: 130 },
-  { type: "agent-started", key: "k0", at: 135 },
-  { type: "agent-progress", key: "k0", tokens: 20400, model: "claude-opus-4-8[1m]", at: 138 },
-  { type: "agent-tool", key: "k0", tool: { name: "WebFetch", input: { url: "https://alexop.dev/list-everything" } }, at: 140 },
-  { type: "agent-output", key: "k0", chunk: "result line 1", at: 150 },
-  { type: "agent-finished", key: "k0", usage: { inputTokens: 1, outputTokens: 9 }, cached: false, model: "claude-opus-4-8[1m]", at: 160 },
+  event("run-started", { runId: "r1", name: "demo", at: 100 }),
+  event("phase-started", { phase: "Scope", at: 110 }),
+  event("phase-started", { phase: "Search", at: 120 }),
+  event("agent-queued", { label: "angle-0", phase: "Search", prompt: "find a\nfind b", at: 130 }),
+  event("agent-started", { at: 135 }),
+  event("agent-progress", { tokens: 20400, model: MODEL, at: 138 }),
+  event("agent-tool", { tool: { name: "WebFetch", input: { url: "https://alexop.dev/list-everything" } }, at: 140 }),
+  event("agent-output", { chunk: "result line 1", at: 150 }),
+  event("agent-finished", { usage: usage({ inputTokens: 1, outputTokens: 9 }), model: MODEL, at: 160 }),
 ];
 const state = events.reduce(reduce, initialRunState());
 const agent = agentsInPhase(state, "Search")[0]!;
@@ -44,10 +48,10 @@ describe("selectors", () => {
   });
 
   it("runElapsedMs freezes at run-finished for a finished/watched run, ignoring live now", () => {
-    const finished = ([
-      { type: "run-started", runId: "r", name: "d", at: 1000 },
-      { type: "run-finished", runId: "r", at: 4000 },
-    ] satisfies WorkflowEvent[]).reduce(reduce, initialRunState());
+    const finished = [
+      event("run-started", { runId: "r", name: "d", at: 1000 }),
+      event("run-finished", { runId: "r", at: 4000 }),
+    ].reduce(reduce, initialRunState());
     expect(runElapsedMs(finished, 9_999_999)).toBe(3000); // not now - startedAt
   });
 

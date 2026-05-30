@@ -43,7 +43,7 @@ export async function dispatch(argv: readonly string[], deps: AppDeps): Promise<
       },
     });
   } catch (e) {
-    deps.print(`error: ${(e as Error).message}\n`);
+    deps.ui.print(`error: ${(e as Error).message}\n`);
     return 1;
   }
 
@@ -51,7 +51,7 @@ export async function dispatch(argv: readonly string[], deps: AppDeps): Promise<
   const command = positionals[0];
 
   if (values["help"] || command === undefined) {
-    deps.print(USAGE);
+    deps.ui.print(USAGE);
     return command === undefined && !values["help"] ? 1 : 0;
   }
 
@@ -63,7 +63,7 @@ export async function dispatch(argv: readonly string[], deps: AppDeps): Promise<
   };
   const requireId = (label: string): string | undefined => {
     const id = positionals[1];
-    if (id === undefined) deps.print(`error: ${label} requires a run id\n`);
+    if (id === undefined) deps.ui.print(`error: ${label} requires a run id\n`);
     return id;
   };
 
@@ -71,7 +71,7 @@ export async function dispatch(argv: readonly string[], deps: AppDeps): Promise<
     case "run": {
       const script = positionals[1];
       if (script === undefined) {
-        deps.print("error: run requires a script path\n");
+        deps.ui.print("error: run requires a script path\n");
         return 1;
       }
       return runCommand({ script, ...runFlags }, deps);
@@ -102,9 +102,9 @@ export async function dispatch(argv: readonly string[], deps: AppDeps): Promise<
       return adaptersCommand(deps);
     default: {
       // Treat an unknown command as a saved/bundled workflow name.
-      const resolved = resolveSavedWorkflow(command, { homeDir: deps.homeDir, cwd: deps.cwd, readFile: deps.readTextFile });
+      const resolved = resolveSavedWorkflow(command, { homeDir: deps.env.homeDir, cwd: deps.env.cwd, readFile: deps.io.readText });
       if (!resolved) {
-        deps.print(`error: unknown command or workflow '${command}'\n`);
+        deps.ui.print(`error: unknown command or workflow '${command}'\n`);
         return 1;
       }
       return runCommand({ script: resolved.path, ...runFlags }, deps);
