@@ -1,6 +1,6 @@
 {
   "name": "defineworkflow",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Deterministic, crash-safe multi-agent workflow engine. Author workflows as TypeScript, orchestrate coding-agent calls with agent()/parallel()/pipeline(), and replay from a journal.",
   "keywords": [
     "workflow",
