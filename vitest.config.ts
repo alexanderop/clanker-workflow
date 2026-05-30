@@ -16,6 +16,26 @@ export default defineConfig({
         "packages/*/src/**/*.d.ts",
         "**/dist/**",
         "repos/**",
+        // Runnable example workflows: they orchestrate real agents and are
+        // exercised end-to-end (`pnpm example` / e2e), not by unit tests.
+        "packages/examples/**",
+        // Executable bin entrypoints: shebang scripts with top-level await and
+        // process.exit. Their behavior is the CLI itself, covered via dispatch()
+        // tests and e2e; nothing unit-assertable lives in the wrapper.
+        "**/packages/*/src/cli.ts",
+        // The CLI package barrel — pure `export … from` re-exports, no logic.
+        "**/packages/cli/src/index.ts",
+        // Host composition root: wires real fs/process/Ink/SDK into AppDeps.
+        // Testing it would mean mocking the entire OS; the pieces it assembles
+        // are unit-tested individually.
+        "**/packages/cli/src/node-deps.ts",
+        // Optional-SDK IO boundary: lazily imports @anthropic-ai/sdk and makes a
+        // live API call. The key-gating logic is unit-tested; the request body
+        // needs the real SDK + network and is covered by e2e, not unit tests.
+        "**/packages/cli/src/anthropic.ts",
+        // Type-only modules (interfaces/types, zero emitted runtime code).
+        "**/packages/cli/src/app.ts",
+        "**/packages/core/src/types.ts",
       ],
       // text  -> per-file terminal table, grouped by package directory
       // html  -> ./coverage/index.html, drillable per package
@@ -29,7 +49,6 @@ export default defineConfig({
         functions: 0,
         branches: 0,
         statements: 0,
-        // "packages/core/src/**": { lines: 85, functions: 85, branches: 75 },
       },
     },
   },

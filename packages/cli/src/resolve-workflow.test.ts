@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { createScriptedRunner, createJournal } from "@workflow/core";
+import { createScriptedRunner, createJournal, WorkflowThrow } from "@workflow/core";
 import { runWorkflow } from "./orchestrator.js";
 import { buildWorkflowResolver } from "./resolve-workflow.js";
 
@@ -42,5 +42,24 @@ describe("buildWorkflowResolver", () => {
     });
 
     expect(result._unsafeUnwrap().returnValue).toEqual({ child: "deep" });
+  });
+
+  it("resolves from the bundled dir when no project/personal copy exists", async () => {
+    const resolve = buildWorkflowResolver({
+      homeDir: "/home",
+      cwd: "/proj",
+      bundledDir: "/bundled",
+      readTextFile: (p) => (p === "/bundled/child.ts" ? CHILD_SOURCE : undefined),
+    });
+    const loaded = await resolve("child");
+    expect(loaded.meta.name).toBe("child");
+  });
+
+  it("throws a WorkflowThrow (AdapterSpawn) when the named workflow is missing", async () => {
+    const resolve = buildWorkflowResolver({ homeDir: "/home", cwd: "/proj", readTextFile: () => undefined });
+    await expect(resolve("ghost")).rejects.toBeInstanceOf(WorkflowThrow);
+    await expect(resolve("ghost")).rejects.toMatchObject({
+      workflowError: { kind: "AdapterSpawn", adapter: "workflow" },
+    });
   });
 });

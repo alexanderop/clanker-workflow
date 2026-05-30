@@ -178,3 +178,114 @@ return x;`;
     expect(() => extractMeta(src)).toThrow(/SandboxViolation: .*first statement/);
   });
 });
+
+describe("extractMeta literal evaluation", () => {
+  it("evaluates array, nested-object, and quote-less template literal values", () => {
+    const src = `export const meta = {
+      name: \`demo\`,
+      description: "d",
+      harness: "claude",
+      phases: [{ title: "A" }, { title: "B" }],
+      output: "./out",
+    };
+    return 1;`;
+    const meta = extractMeta(src);
+    expect(meta.name).toBe("demo"); // template literal with no interpolation
+    expect(meta.phases).toEqual([{ title: "A" }, { title: "B" }]);
+    expect(meta.output).toBe("./out");
+  });
+
+  it("evaluates a negative-number value and a string-literal key inside a nested field", () => {
+    // -3 exercises the negative-number UnaryExpression branch; "weight" the string-literal key branch.
+    // phases is preserved verbatim by validateMeta, so the evaluated values survive into the result.
+    const src = `export const meta = { name: "n", description: "d", harness: "claude", phases: [{ "weight": -3 }] };\nreturn 1;`;
+    const meta = extractMeta(src);
+    expect(meta.phases).toEqual([{ weight: -3 }]);
+  });
+
+  it("rejects a sparse array in meta", () => {
+    const src = `export const meta = { name: "n", description: "d", harness: "claude", phases: [1, , 3] };\nreturn 1;`;
+    expect(() => extractMeta(src)).toThrow(/SandboxViolation: sparse arrays not allowed/);
+  });
+
+  it("rejects a spread element inside an array in meta", () => {
+    const src = `export const meta = { name: "n", description: "d", harness: "claude", phases: [...others] };\nreturn 1;`;
+    expect(() => extractMeta(src)).toThrow(/SandboxViolation: spread not allowed/);
+  });
+
+  it("rejects template interpolation inside a nested array value", () => {
+    const src = "export const meta = { name: \"n\", description: \"d\", harness: \"claude\", phases: [`p-${id}`] };\nreturn 1;";
+    expect(() => extractMeta(src)).toThrow(/SandboxViolation: template interpolation not allowed/);
+  });
+
+  it("rejects a method shorthand inside meta", () => {
+    const src = `export const meta = { name: "n", description: "d", harness: "claude", run() { return 1; } };\nreturn 1;`;
+    expect(() => extractMeta(src)).toThrow(/SandboxViolation: methods\/accessors not allowed/);
+  });
+});
+
+describe("extractMeta defineWorkflow validation", () => {
+  function defWf(body: string): string {
+    return `import { defineWorkflow } from "defineworkflow";\nexport default defineWorkflow(${body});`;
+  }
+
+  it("ignores the run() method but evaluates the literal metadata fields", () => {
+    const meta = extractMeta(
+      defWf(`{ name: "wf", description: "d", harness: "codex", phases: [{ title: "P" }], async run() { return 1; } }`),
+    );
+    expect(meta).toMatchObject({ name: "wf", harness: "codex", phases: [{ title: "P" }] });
+  });
+
+  it("rejects a non-object-literal argument to defineWorkflow", () => {
+    expect(() => extractMeta(defWf("makeMeta()"))).toThrow(
+      /SandboxViolation: defineWorkflow argument must be an object literal/,
+    );
+  });
+
+  it("rejects a spread inside the defineWorkflow metadata", () => {
+    expect(() => extractMeta(defWf(`{ ...base, name: "wf", description: "d", harness: "claude", run() {} }`))).toThrow(
+      /SandboxViolation: spread not allowed in defineWorkflow metadata/,
+    );
+  });
+
+  it("rejects a computed key inside the defineWorkflow metadata", () => {
+    expect(() =>
+      extractMeta(defWf(`{ ["na" + "me"]: "wf", description: "d", harness: "claude", run() {} }`)),
+    ).toThrow(/SandboxViolation: computed keys not allowed in defineWorkflow metadata/);
+  });
+
+  it("rejects a non-literal metadata field value in defineWorkflow", () => {
+    expect(() =>
+      extractMeta(defWf(`{ name: "wf", description: "d", harness: "claude", output: getOutput(), run() {} }`)),
+    ).toThrow(/SandboxViolation: non-literal value in defineWorkflow\.output/);
+  });
+
+  it("rejects a getter for a metadata field in defineWorkflow", () => {
+    expect(() =>
+      extractMeta(defWf(`{ name: "wf", description: "d", harness: "claude", get output() { return "x"; }, run() {} }`)),
+    ).toThrow(/SandboxViolation: methods\/accessors not allowed in defineWorkflow\.output/);
+  });
+});
+
+describe("runInSandbox compile + runtime errors", () => {
+  it("surfaces a syntax error in the workflow body as a thrown error", async () => {
+    const src = `export const meta = { name: "n", description: "d", harness: "claude", phases: [] };\nconst x = (;`;
+    await expect(runInSandbox(src, {})).rejects.toThrow();
+  });
+
+  it("rejects a script that exports neither meta nor a defineWorkflow default", async () => {
+    const src = `const x = 1;\nexport {};`;
+    await expect(runInSandbox(src, {})).rejects.toThrow(/must export `const meta`/);
+  });
+
+  it("propagates a runtime error thrown by injected globals", async () => {
+    const src = `export const meta = { name: "n", description: "d", harness: "claude", phases: [] };\nreturn await boom();`;
+    await expect(
+      runInSandbox(src, {
+        boom: async () => {
+          throw new Error("kaboom");
+        },
+      }),
+    ).rejects.toThrow(/kaboom/);
+  });
+});
