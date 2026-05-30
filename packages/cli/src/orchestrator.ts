@@ -29,6 +29,7 @@ export interface RunWorkflowDeps {
   readonly gate?: (() => Promise<void>) | undefined;
   readonly resolveWorkflow?: RuntimeDeps["resolveWorkflow"] | undefined;
   readonly resolveRunner?: RuntimeDeps["resolveRunner"] | undefined;
+  readonly makeIsolatedCwd?: RuntimeDeps["makeIsolatedCwd"] | undefined;
 }
 
 export interface RunResult {
@@ -63,6 +64,7 @@ export async function runWorkflow(deps: RunWorkflowDeps): Promise<Result<RunResu
     ...(deps.gate ? { gate: deps.gate } : {}),
     ...(deps.resolveWorkflow ? { resolveWorkflow: deps.resolveWorkflow } : {}),
     ...(deps.resolveRunner ? { resolveRunner: deps.resolveRunner } : {}),
+    ...(deps.makeIsolatedCwd ? { makeIsolatedCwd: deps.makeIsolatedCwd } : {}),
   });
 
   try {

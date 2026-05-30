@@ -91,6 +91,7 @@ export async function buildNodeDeps(cliPath: string): Promise<AppDeps> {
     config,
     cwd,
     homeDir,
+    tmpDir: path.join(os.tmpdir(), "workflow-worktrees"),
     cores,
     env,
     isTTY: Boolean(process.stdout.isTTY),

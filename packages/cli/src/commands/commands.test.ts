@@ -31,6 +31,7 @@ function fakeDeps(overrides: Partial<AppDeps> = {}): { deps: AppDeps; out: () =>
     config: {},
     cwd: "/proj",
     homeDir: "/home/me",
+    tmpDir: "/tmp/wt",
     cores: 12,
     env: {},
     isTTY: false,

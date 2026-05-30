@@ -14,6 +14,8 @@ export interface AppDeps {
   readonly config: WorkflowConfig;
   readonly cwd: string;
   readonly homeDir: string;
+  /** Base directory for ephemeral worktrees etc. */
+  readonly tmpDir: string;
   readonly cores: number;
   readonly env: Readonly<Record<string, string | undefined>>;
   readonly isTTY: boolean;

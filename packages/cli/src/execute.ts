@@ -7,6 +7,7 @@ import { runWorkflow } from "./orchestrator.js";
 import type { RunStatus } from "./registry.js";
 import { formatError } from "./format-error.js";
 import { buildWorkflowResolver } from "./resolve-workflow.js";
+import { createWorktreeFactory } from "./worktree.js";
 
 export interface ExecuteParams {
   readonly runId: string;
@@ -78,6 +79,7 @@ export async function runForeground(deps: AppDeps, params: ExecuteParams): Promi
   });
 
   const { resolveRunner } = buildRunnerMap(deps.detected, deps.config, { processRunner: deps.processRunner, complete: deps.complete });
+  const makeIsolatedCwd = createWorktreeFactory({ processRunner: deps.processRunner, baseCwd: deps.cwd, tmpRoot: deps.tmpDir, runId: params.runId, warn: note });
 
   const result = await runWorkflow({
     source: params.source,
@@ -96,6 +98,7 @@ export async function runForeground(deps: AppDeps, params: ExecuteParams): Promi
     gate,
     resolveWorkflow: buildWorkflowResolver({ homeDir: deps.homeDir, cwd: deps.cwd, readTextFile: deps.readTextFile }),
     resolveRunner,
+    makeIsolatedCwd,
   });
 
   const status: RunStatus = controller.signal.aborted ? "stopped" : result.isOk() ? "finished" : "failed";
@@ -112,6 +115,13 @@ export async function runForeground(deps: AppDeps, params: ExecuteParams): Promi
 /** Run headless (the detached child body). Returns a process exit code. */
 export async function runHeadless(deps: AppDeps, params: ExecuteParams, controller: AbortController): Promise<number> {
   const { resolveRunner } = buildRunnerMap(deps.detected, deps.config, { processRunner: deps.processRunner, complete: deps.complete });
+  const makeIsolatedCwd = createWorktreeFactory({
+    processRunner: deps.processRunner,
+    baseCwd: deps.cwd,
+    tmpRoot: deps.tmpDir,
+    runId: params.runId,
+    warn: (message) => deps.registry.appendEvent(params.runId, { type: "log", message, at: deps.now() }),
+  });
 
   const result = await runWorkflow({
     source: params.source,
@@ -128,6 +138,7 @@ export async function runHeadless(deps: AppDeps, params: ExecuteParams, controll
     signal: controller.signal,
     resolveWorkflow: buildWorkflowResolver({ homeDir: deps.homeDir, cwd: deps.cwd, readTextFile: deps.readTextFile }),
     resolveRunner,
+    makeIsolatedCwd,
   });
 
   const status: RunStatus = controller.signal.aborted ? "stopped" : result.isOk() ? "finished" : "failed";
