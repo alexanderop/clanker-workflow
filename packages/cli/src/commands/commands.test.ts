@@ -1,8 +1,12 @@
 import { describe, it, expect } from "vitest";
 import { startUi } from "@workflow/ui";
+import { ok, err } from "neverthrow";
+import type { Result } from "neverthrow";
+import type { AgentRunner, AgentRequest, AgentResult, RunCtx, WorkflowError } from "@workflow/core";
 import type { AppDeps } from "../app.js";
 import { createRegistry, type RegistryFs } from "../registry.js";
 import { dispatch } from "../dispatch.js";
+import { runForeground } from "../execute.js";
 
 function memFs(seed: Record<string, string> = {}): RegistryFs & { files: Map<string, string> } {
   const files = new Map<string, string>(Object.entries(seed));
@@ -27,6 +31,7 @@ function fakeDeps(overrides: Partial<AppDeps> = {}): { deps: AppDeps; out: () =>
     config: {},
     cwd: "/proj",
     homeDir: "/home/me",
+    tmpDir: "/tmp/wt",
     cores: 12,
     env: {},
     isTTY: false,
@@ -43,6 +48,7 @@ function fakeDeps(overrides: Partial<AppDeps> = {}): { deps: AppDeps; out: () =>
     print: (t) => {
       out += t;
     },
+    bundledDir: "/bundled",
     startUi,
     consentIO: { question: async () => "n", write: () => {} },
     persistConsent: () => {},
@@ -125,5 +131,122 @@ describe("dispatch run (end-to-end, line-log)", () => {
     // line-log output records the run + the finished agent
     expect(out).toContain("hello");
     expect(out).toContain("greeter");
+  });
+});
+
+interface Deferred<T> {
+  promise: Promise<T>;
+  resolve: (v: T) => void;
+}
+function deferred<T>(): Deferred<T> {
+  let resolve!: (v: T) => void;
+  const promise = new Promise<T>((r) => (resolve = r));
+  return { promise, resolve };
+}
+
+interface ControllableRunner extends AgentRunner {
+  callCount(label: string): number;
+  resolve(label: string, text: string): void;
+}
+function createControllableRunner(): ControllableRunner {
+  const counts = new Map<string, number>();
+  const pending = new Map<string, Array<Deferred<Result<AgentResult, WorkflowError>>>>();
+  return {
+    id: "scripted",
+    capabilities: { nativeSchema: true, reportsTokens: true, toolEvents: false },
+    run: (req: AgentRequest, _ctx: RunCtx) => {
+      const label = req.label ?? "";
+      counts.set(label, (counts.get(label) ?? 0) + 1);
+      const d = deferred<Result<AgentResult, WorkflowError>>();
+      const stack = pending.get(label) ?? [];
+      stack.push(d);
+      pending.set(label, stack);
+      req.signal.addEventListener("abort", () =>
+        d.resolve(err({ kind: "AdapterSpawn", adapter: "scripted", cause: "agent stopped" })),
+      );
+      return d.promise;
+    },
+    callCount: (label) => counts.get(label) ?? 0,
+    resolve: (label, text) => {
+      const s = pending.get(label);
+      const d = s?.[s.length - 1];
+      if (d) d.resolve(ok({ text, data: undefined, usage: { inputTokens: 0, outputTokens: 0 }, toolCalls: [] }));
+    },
+  };
+}
+
+const flush = () => new Promise((r) => setTimeout(r, 0));
+
+describe("runForeground agent control", () => {
+  it("agent-scoped stop fails just that agent, others finish", async () => {
+    const SOURCE = `export const meta = { name: "t", description: "d" } as const
+const r = await parallel([() => agent("x", { label: "a" }), () => agent("y", { label: "b" })]);
+return r;`;
+
+    let onAction!: (a: import("@workflow/ui").UiAction) => void;
+    const { deps } = fakeDeps({
+      startUi: (opts) => {
+        onAction = opts.onAction!;
+        return { unmount() {} };
+      },
+    });
+    deps.registry.init(
+      { runId: "r1", name: "t", scriptPath: null, args: {}, adapter: "codex", status: "running", startedAt: 0, endedAt: null, pid: null, scriptHash: "h" },
+      SOURCE,
+    );
+
+    const runner = createControllableRunner();
+    const p = runForeground(deps, { runId: "r1", source: SOURCE, args: {}, runner, adapter: "codex", seed: [] });
+    await flush();
+
+    expect(runner.callCount("a")).toBe(1);
+    expect(runner.callCount("b")).toBe(1);
+
+    onAction({ type: "stop", target: { scope: "agent", key: "0:default:a" } });
+    runner.resolve("b", "done-b");
+
+    const code = await p;
+    expect(code).toBe(0);
+
+    const events = deps.registry.readEvents("r1");
+    expect(events.some((e) => e.type === "agent-failed" && e.key === "0:default:a")).toBe(true);
+    expect(events.some((e) => e.type === "agent-finished" && e.key === "1:default:b")).toBe(true);
+  });
+
+  it("restart yields a second runner call", async () => {
+    const SOURCE2 = `export const meta = { name: "t", description: "d" } as const
+const v = await agent("x", { label: "a" });
+return v;`;
+
+    let onAction!: (a: import("@workflow/ui").UiAction) => void;
+    const { deps } = fakeDeps({
+      startUi: (opts) => {
+        onAction = opts.onAction!;
+        return { unmount() {} };
+      },
+    });
+    deps.registry.init(
+      { runId: "r2", name: "t", scriptPath: null, args: {}, adapter: "codex", status: "running", startedAt: 0, endedAt: null, pid: null, scriptHash: "h" },
+      SOURCE2,
+    );
+
+    const runner = createControllableRunner();
+    const p = runForeground(deps, { runId: "r2", source: SOURCE2, args: {}, runner, adapter: "codex", seed: [] });
+    await flush();
+
+    expect(runner.callCount("a")).toBe(1);
+
+    onAction({ type: "restart", key: "0:default:a" });
+    await flush();
+    await flush();
+    expect(runner.callCount("a")).toBe(2);
+
+    runner.resolve("a", "second");
+    const code = await p;
+    expect(code).toBe(0);
+    expect(runner.callCount("a")).toBe(2);
+
+    const events = deps.registry.readEvents("r2");
+    expect(events.some((e) => e.type === "agent-failed" && e.key === "0:default:a")).toBe(false);
   });
 });

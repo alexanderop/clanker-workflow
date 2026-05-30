@@ -14,6 +14,8 @@ export interface AppDeps {
   readonly config: WorkflowConfig;
   readonly cwd: string;
   readonly homeDir: string;
+  /** Base directory for ephemeral worktrees etc. */
+  readonly tmpDir: string;
   readonly cores: number;
   readonly env: Readonly<Record<string, string | undefined>>;
   readonly isTTY: boolean;
@@ -30,6 +32,8 @@ export interface AppDeps {
   readonly readTextFile: (path: string) => string | undefined;
   readonly writeTextFile: (path: string, data: string) => void;
   readonly print: (text: string) => void;
+  /** Dir holding the CLI's bundled example workflows. */
+  readonly bundledDir: string;
 
   readonly startUi: (opts: StartUiOptions) => UiHandle;
   readonly consentIO: ConsentIO;

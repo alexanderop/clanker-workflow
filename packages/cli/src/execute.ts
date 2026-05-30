@@ -1,9 +1,13 @@
+import { createControlRegistry } from "@workflow/core";
 import type { AgentRunner, JournalEntry, WorkflowEvent } from "@workflow/core";
 import type { AppDeps } from "./app.js";
+import { buildRunnerMap } from "./adapter-select.js";
 import { effectiveConcurrency, effectiveMaxAgents } from "./config.js";
 import { runWorkflow } from "./orchestrator.js";
 import type { RunStatus } from "./registry.js";
 import { formatError } from "./format-error.js";
+import { buildWorkflowResolver } from "./resolve-workflow.js";
+import { createWorktreeFactory } from "./worktree.js";
 
 export interface ExecuteParams {
   readonly runId: string;
@@ -35,6 +39,7 @@ function createGate(): { gate: () => Promise<void>; toggle: () => boolean } {
 /** Run with the live Ink UI attached (run + resume foreground). Returns a process exit code. */
 export async function runForeground(deps: AppDeps, params: ExecuteParams): Promise<number> {
   const controller = new AbortController();
+  const control = createControlRegistry();
   const { gate, toggle } = createGate();
   const listeners = new Set<(e: WorkflowEvent) => void>();
 
@@ -60,10 +65,10 @@ export async function runForeground(deps: AppDeps, params: ExecuteParams): Promi
           break;
         case "stop":
           if (action.target.scope === "run") controller.abort();
-          else note("agent-scoped stop is not supported yet (4a stops the whole run with x on phases)");
+          else control.stopAgent(action.target.key);
           break;
         case "restart":
-          note("agent restart is not supported yet (deferred to 4b)");
+          control.restartAgent(action.key);
           break;
         case "save":
           saveRun(deps, params.runId);
@@ -72,6 +77,9 @@ export async function runForeground(deps: AppDeps, params: ExecuteParams): Promi
       }
     },
   });
+
+  const { resolveRunner } = buildRunnerMap(deps.detected, deps.config, { processRunner: deps.processRunner, complete: deps.complete });
+  const makeIsolatedCwd = createWorktreeFactory({ processRunner: deps.processRunner, baseCwd: deps.cwd, tmpRoot: deps.tmpDir, runId: params.runId, warn: note });
 
   const result = await runWorkflow({
     source: params.source,
@@ -86,7 +94,11 @@ export async function runForeground(deps: AppDeps, params: ExecuteParams): Promi
     emit,
     now: deps.now,
     signal: controller.signal,
+    control,
     gate,
+    resolveWorkflow: buildWorkflowResolver({ homeDir: deps.homeDir, cwd: deps.cwd, readTextFile: deps.readTextFile, bundledDir: deps.bundledDir }),
+    resolveRunner,
+    makeIsolatedCwd,
   });
 
   const status: RunStatus = controller.signal.aborted ? "stopped" : result.isOk() ? "finished" : "failed";
@@ -102,6 +114,15 @@ export async function runForeground(deps: AppDeps, params: ExecuteParams): Promi
 
 /** Run headless (the detached child body). Returns a process exit code. */
 export async function runHeadless(deps: AppDeps, params: ExecuteParams, controller: AbortController): Promise<number> {
+  const { resolveRunner } = buildRunnerMap(deps.detected, deps.config, { processRunner: deps.processRunner, complete: deps.complete });
+  const makeIsolatedCwd = createWorktreeFactory({
+    processRunner: deps.processRunner,
+    baseCwd: deps.cwd,
+    tmpRoot: deps.tmpDir,
+    runId: params.runId,
+    warn: (message) => deps.registry.appendEvent(params.runId, { type: "log", message, at: deps.now() }),
+  });
+
   const result = await runWorkflow({
     source: params.source,
     args: params.args,
@@ -115,6 +136,9 @@ export async function runHeadless(deps: AppDeps, params: ExecuteParams, controll
     emit: (event) => deps.registry.appendEvent(params.runId, event),
     now: deps.now,
     signal: controller.signal,
+    resolveWorkflow: buildWorkflowResolver({ homeDir: deps.homeDir, cwd: deps.cwd, readTextFile: deps.readTextFile, bundledDir: deps.bundledDir }),
+    resolveRunner,
+    makeIsolatedCwd,
   });
 
   const status: RunStatus = controller.signal.aborted ? "stopped" : result.isOk() ? "finished" : "failed";

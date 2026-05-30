@@ -13,3 +13,4 @@ export {
   type LoadedWorkflow,
 } from "./runtime.js";
 export { createScriptedRunner, type ScriptedRunner, type ScriptedResponse } from "./scripted-runner.js";
+export { createControlRegistry, type AgentControl, type ControlRegistry } from "./control.js";
