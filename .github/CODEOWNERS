@@ -1,0 +1,5 @@
+# Default owner for everything in the repository. Opening a PR auto-requests a
+# review from @alexanderop. Code-owner review is NOT enforced in branch
+# protection (a solo maintainer can't approve their own PR), so this serves as
+# ownership documentation and review auto-assignment rather than a merge gate.
+* @alexanderop

@@ -1,0 +1,8 @@
+name: CodeQL config
+
+# Don't analyze vendored third-party source or build output — only our code.
+# `repos/` holds read-only reference subtrees (ink, etc.); scanning them would
+# produce noisy alerts on code we don't own and can't fix.
+paths-ignore:
+  - repos
+  - "**/dist"

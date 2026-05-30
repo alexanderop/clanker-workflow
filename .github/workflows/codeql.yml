@@ -1,0 +1,48 @@
+name: CodeQL
+
+# Static security analysis (GitHub code scanning) for the TypeScript/JavaScript
+# sources. Findings surface under the repo's Security → Code scanning tab.
+# Code scanning with CodeQL is free for public repositories.
+#
+# The single job is named "CodeQL" so its check context is a stable, simple
+# "CodeQL" — that's the name wired into main's required-status-checks.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 6 * * 1" # weekly safety net — Mondays 06:00 UTC
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  analyze:
+    name: CodeQL
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read # read workflow run metadata
+      contents: read # checkout
+      security-events: write # upload code-scanning results
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false # don't leave the git token on disk
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@03e4368ac7daa2bd82b3e85262f3bf87ee112f57 # v3
+        with:
+          languages: javascript-typescript
+          config-file: ./.github/codeql/codeql-config.yml
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@03e4368ac7daa2bd82b3e85262f3bf87ee112f57 # v3
+        with:
+          category: "/language:javascript-typescript"
