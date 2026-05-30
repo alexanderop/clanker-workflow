@@ -1,3 +1,4 @@
+import { createControlRegistry } from "@workflow/core";
 import type { AgentRunner, JournalEntry, WorkflowEvent } from "@workflow/core";
 import type { AppDeps } from "./app.js";
 import { buildRunnerMap } from "./adapter-select.js";
@@ -37,6 +38,7 @@ function createGate(): { gate: () => Promise<void>; toggle: () => boolean } {
 /** Run with the live Ink UI attached (run + resume foreground). Returns a process exit code. */
 export async function runForeground(deps: AppDeps, params: ExecuteParams): Promise<number> {
   const controller = new AbortController();
+  const control = createControlRegistry();
   const { gate, toggle } = createGate();
   const listeners = new Set<(e: WorkflowEvent) => void>();
 
@@ -62,10 +64,10 @@ export async function runForeground(deps: AppDeps, params: ExecuteParams): Promi
           break;
         case "stop":
           if (action.target.scope === "run") controller.abort();
-          else note("agent-scoped stop is not supported yet (4a stops the whole run with x on phases)");
+          else control.stopAgent(action.target.key);
           break;
         case "restart":
-          note("agent restart is not supported yet (deferred to 4b)");
+          control.restartAgent(action.key);
           break;
         case "save":
           saveRun(deps, params.runId);
@@ -90,6 +92,7 @@ export async function runForeground(deps: AppDeps, params: ExecuteParams): Promi
     emit,
     now: deps.now,
     signal: controller.signal,
+    control,
     gate,
     resolveWorkflow: buildWorkflowResolver({ homeDir: deps.homeDir, cwd: deps.cwd, readTextFile: deps.readTextFile }),
     resolveRunner,
