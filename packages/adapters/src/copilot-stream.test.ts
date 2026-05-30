@@ -12,21 +12,24 @@ function drive(translator: ReturnType<typeof createCopilotTranslator>, text: str
 }
 
 describe("copilot stream translator", () => {
-  it("extracts model, tool calls, rising tokens, and final result from the fixture", () => {
+  it("extracts model, tool calls, rising tokens, and final message from the fixture", () => {
     const t = createCopilotTranslator();
     const progress = drive(t, fixture);
 
-    expect(progress.find((p) => p.model)?.model).toBe("claude-sonnet-4-6");
+    expect(progress.find((p) => p.model)?.model).toBe("claude-sonnet-4.6");
     expect(progress.filter((p) => p.tool).map((p) => p.tool!.name)).toEqual(["str_replace_editor", "bash"]);
-    expect(progress.filter((p) => p.tokens !== undefined).map((p) => p.tokens)).toEqual([80, 220]);
+    // Per-message `outputTokens` accumulate into a cumulative live count (80, then 80+160).
+    expect(progress.filter((p) => p.tokens !== undefined).map((p) => p.tokens)).toEqual([80, 240]);
 
     const final = t.result();
+    // Final answer is the last non-empty `assistant.message.content`; the `result`
+    // event carries no text in real copilot output.
     expect(final.text).toBe('{"n": 7}');
     expect(final.usage).toEqual({ inputTokens: 0, outputTokens: 240 });
   });
 
   it("skips session noise lines without emitting tokens", () => {
     const t = createCopilotTranslator();
-    expect(t.push('{"type":"session.updated"}')).toEqual([]);
+    expect(t.push('{"type":"session.mcp_servers_loaded","data":{}}')).toEqual([]);
   });
 });

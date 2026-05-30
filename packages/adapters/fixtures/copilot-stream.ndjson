@@ -1,6 +1,16 @@
-{"type":"session.created","model":"claude-sonnet-4-6","session_id":"s1"}
-{"type":"assistant.tool_call","name":"str_replace_editor","arguments":{"path":"a.ts"}}
-{"type":"assistant.message_delta","usage":{"output_tokens":80}}
-{"type":"assistant.tool_call","name":"bash","arguments":{"command":"pnpm test"}}
-{"type":"assistant.turn_end","usage":{"output_tokens":220}}
-{"type":"result","result":"{\"n\": 7}","usage":{"output_tokens":240},"is_error":false}
+{"type":"session.mcp_servers_loaded","data":{"servers":[{"name":"github-mcp-server","status":"connected"}]},"id":"n0","ephemeral":true}
+{"type":"session.tools_updated","data":{"model":"claude-sonnet-4.6"},"id":"s0","ephemeral":true}
+{"type":"user.message","data":{"content":"create hello.txt"},"id":"u0"}
+{"type":"assistant.turn_start","data":{"turnId":"0"},"id":"ts0"}
+{"type":"tool.execution_start","data":{"toolCallId":"t1","toolName":"str_replace_editor","arguments":{"path":"a.ts"},"turnId":"0"},"id":"x1"}
+{"type":"tool.execution_complete","data":{"toolCallId":"t1","success":true,"result":{"content":"ok"}},"id":"x2"}
+{"type":"tool.execution_start","data":{"toolCallId":"t2","toolName":"bash","arguments":{"command":"pnpm test"},"turnId":"0"},"id":"x3"}
+{"type":"tool.execution_complete","data":{"toolCallId":"t2","success":true,"result":{"content":"ok"}},"id":"x4"}
+{"type":"assistant.message","data":{"messageId":"m0","model":"claude-sonnet-4.6","content":"","toolRequests":[{"name":"str_replace_editor"},{"name":"bash"}],"outputTokens":80},"id":"am0"}
+{"type":"assistant.turn_end","data":{"turnId":"0"},"id":"te0"}
+{"type":"assistant.message_start","data":{"messageId":"m1"},"id":"ms1","ephemeral":true}
+{"type":"assistant.message_delta","data":{"messageId":"m1","deltaContent":"{\"n\": "},"id":"d1","ephemeral":true}
+{"type":"assistant.message_delta","data":{"messageId":"m1","deltaContent":"7}"},"id":"d2","ephemeral":true}
+{"type":"assistant.message","data":{"messageId":"m1","model":"claude-sonnet-4.6","content":"{\"n\": 7}","toolRequests":[],"outputTokens":160},"id":"am1"}
+{"type":"assistant.turn_end","data":{"turnId":"1"},"id":"te1"}
+{"type":"result","timestamp":"2026-05-30T18:10:17.437Z","sessionId":"c2","exitCode":0,"usage":{"premiumRequests":1,"totalApiDurationMs":7757,"sessionDurationMs":9780,"codeChanges":{"linesAdded":1,"linesRemoved":0,"filesModified":["hello.txt"]}}}

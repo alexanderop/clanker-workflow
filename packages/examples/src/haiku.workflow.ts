@@ -17,7 +17,7 @@ import { agent, defineWorkflow, log, phase } from "defineworkflow";
 export default defineWorkflow({
   name: "haiku",
   description: "Ask an agent to write a haiku about durable workflows",
-  harness: "claude",
+  harness: "copilot",
   phases: [{ title: "Write" }],
 
   async run() {

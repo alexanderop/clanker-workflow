@@ -3,10 +3,13 @@ import type { AgentProgress } from "@workflow/core";
 import { createCopilotAdapter } from "./copilot.js";
 import { createFakeProcessRunner } from "./fake-process-runner.js";
 
+// Mirrors the real `copilot --output-format json` shape: payloads nested under
+// `data`, answer text + tokens in `assistant.message`, and a text/token-free
+// terminal `result` event.
 const resultStream = (resultText: string): string =>
-  `{"type":"session.created","model":"claude-sonnet-4-6"}\n` +
-  `{"type":"assistant.turn_end","usage":{"output_tokens":42}}\n` +
-  `{"type":"result","result":${JSON.stringify(resultText)},"usage":{"output_tokens":42}}`;
+  `{"type":"session.tools_updated","data":{"model":"claude-sonnet-4-6"}}\n` +
+  `{"type":"assistant.message","data":{"model":"claude-sonnet-4-6","content":${JSON.stringify(resultText)},"outputTokens":42}}\n` +
+  `{"type":"result","exitCode":0,"usage":{"premiumRequests":1}}`;
 
 describe("copilot adapter", () => {
   it("injects the schema into the prompt, extracts+validates JSON from the json stream, builds expected argv", async () => {
