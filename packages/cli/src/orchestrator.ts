@@ -4,6 +4,7 @@ import {
   createSemaphore,
   WorkflowThrow,
   type AgentRunner,
+  type ControlRegistry,
   type Journal,
   type RuntimeDeps,
   type WorkflowError,
@@ -24,8 +25,11 @@ export interface RunWorkflowDeps {
   readonly emit: (event: WorkflowEvent) => void;
   readonly now: () => number;
   readonly signal?: AbortSignal | undefined;
+  readonly control?: ControlRegistry | undefined;
   readonly gate?: (() => Promise<void>) | undefined;
   readonly resolveWorkflow?: RuntimeDeps["resolveWorkflow"] | undefined;
+  readonly resolveRunner?: RuntimeDeps["resolveRunner"] | undefined;
+  readonly makeIsolatedCwd?: RuntimeDeps["makeIsolatedCwd"] | undefined;
 }
 
 export interface RunResult {
@@ -64,8 +68,11 @@ export async function runWorkflow(deps: RunWorkflowDeps): Promise<Result<RunResu
     emit: deps.emit,
     now: deps.now,
     ...(deps.signal ? { signal: deps.signal } : {}),
+    ...(deps.control ? { control: deps.control } : {}),
     ...(deps.gate ? { gate: deps.gate } : {}),
     ...(deps.resolveWorkflow ? { resolveWorkflow: deps.resolveWorkflow } : {}),
+    ...(deps.resolveRunner ? { resolveRunner: deps.resolveRunner } : {}),
+    ...(deps.makeIsolatedCwd ? { makeIsolatedCwd: deps.makeIsolatedCwd } : {}),
   });
 
   try {

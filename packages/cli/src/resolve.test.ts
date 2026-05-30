@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { resolveSavedWorkflow, type ResolveDeps } from "./resolve.js";
 
-function deps(files: Record<string, string>): ResolveDeps {
-  return { homeDir: "/home/me", cwd: "/proj", readFile: (p) => files[p] };
+function deps(files: Record<string, string>, bundledDir?: string): ResolveDeps {
+  return { homeDir: "/home/me", cwd: "/proj", readFile: (p) => files[p], bundledDir };
 }
 
 const projTs = "/proj/.workflow/workflows/deep.ts";
@@ -28,6 +28,24 @@ describe("resolveSavedWorkflow", () => {
   });
 
   it("returns undefined on a miss", () => {
+    expect(resolveSavedWorkflow("nope", deps({}))).toBeUndefined();
+  });
+
+  it("resolves a bundled workflow when no project/personal copy exists", () => {
+    const r = resolveSavedWorkflow("deep-research", deps({ "/bundled/deep-research.ts": "BUNDLED" }, "/bundled"));
+    expect(r?.source).toBe("BUNDLED");
+    expect(r?.path).toBe("/bundled/deep-research.ts");
+  });
+
+  it("project copy wins over bundled", () => {
+    const r = resolveSavedWorkflow(
+      "deep",
+      deps({ "/proj/.workflow/workflows/deep.ts": "PROJECT", "/bundled/deep.ts": "BUNDLED" }, "/bundled"),
+    );
+    expect(r?.source).toBe("PROJECT");
+  });
+
+  it("bundled is ignored when bundledDir is not provided", () => {
     expect(resolveSavedWorkflow("nope", deps({}))).toBeUndefined();
   });
 });
