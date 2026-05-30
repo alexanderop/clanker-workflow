@@ -32,9 +32,24 @@ export interface AgentResult {
   readonly toolCalls: readonly ToolEvent[];
 }
 
+/**
+ * Harness-neutral progress signal pushed by a streaming adapter during a run.
+ * Adapters that can't stream simply never call the sink; everything still works.
+ */
+export interface AgentProgress {
+  /** A tool call just observed. */
+  readonly tool?: ToolEvent;
+  /** Cumulative output tokens so far (monotonic). */
+  readonly tokens?: number;
+  /** Raw model id, e.g. `claude-opus-4-8[1m]`. */
+  readonly model?: string;
+}
+
 export interface RunCtx {
   readonly runId: string;
   readonly seq: number;
+  /** Optional live-progress sink; called by streaming adapters as events arrive. */
+  readonly onProgress?: (p: AgentProgress) => void;
 }
 
 export interface AgentRunner {

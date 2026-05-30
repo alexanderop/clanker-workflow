@@ -3,17 +3,11 @@ import type { Result } from "neverthrow";
 import type { AgentRunner, AgentRequest, AgentResult, RunCtx, WorkflowError } from "@workflow/core";
 import type { ProcessRunner } from "./process-runner.js";
 import { CAPABILITIES } from "./detect.js";
+import { translateClaudeLine, extractClaudeFinal } from "./claude-stream.js";
 
 export interface ClaudeAdapterDeps {
   readonly processRunner: ProcessRunner;
   readonly bin?: string;
-}
-
-interface ClaudeResult {
-  readonly result?: unknown;
-  readonly structured_output?: unknown;
-  readonly is_error?: boolean;
-  readonly usage?: { readonly input_tokens?: number; readonly output_tokens?: number };
 }
 
 export function createClaudeAdapter(deps: ClaudeAdapterDeps): AgentRunner {
@@ -21,55 +15,47 @@ export function createClaudeAdapter(deps: ClaudeAdapterDeps): AgentRunner {
   return {
     id: "claude",
     capabilities: CAPABILITIES.claude,
-    run: async (req: AgentRequest, _ctx: RunCtx): Promise<Result<AgentResult, WorkflowError>> => {
-      // YOLO mode: a headless `-p` agent can't answer permission prompts, and
-      // `acceptEdits` blocks WebSearch/WebFetch — so any tool-using agent (e.g.
-      // research) stalls or refuses. Skip all permission checks instead.
-      const args = ["-p", req.prompt, "--output-format", "json", "--dangerously-skip-permissions", "--add-dir", req.cwd];
+    run: async (req: AgentRequest, ctx: RunCtx): Promise<Result<AgentResult, WorkflowError>> => {
+      // Stream JSON so tool calls and rising token counts surface live (the
+      // StreamTranslator forwards them via ctx.onProgress). `--verbose` is required
+      // alongside stream-json in print mode. YOLO mode: a headless `-p` agent can't
+      // answer permission prompts, so skip them entirely.
+      const args = ["-p", req.prompt, "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions", "--add-dir", req.cwd];
       if (req.schema) args.push("--json-schema", JSON.stringify(req.schema));
       if (req.model) args.push("--model", req.model);
 
-      const out = await deps.processRunner.run({ command: bin, args, cwd: req.cwd, signal: req.signal });
-      if (out.code !== 0) {
-        const e: WorkflowError = { kind: "AdapterSpawn", adapter: "claude", cause: out.stderr || `exit ${out.code}` };
-        return err(e);
-      }
-
-      let parsed: ClaudeResult;
-      try {
-        parsed = JSON.parse(out.stdout) as ClaudeResult;
-      } catch (e) {
-        return err({ kind: "AdapterSpawn", adapter: "claude", cause: `unparseable result: ${e instanceof Error ? e.message : String(e)}` });
-      }
-      if (parsed.is_error) {
-        return err({ kind: "AdapterSpawn", adapter: "claude", cause: "claude reported is_error" });
-      }
-
-      // `result` is the assistant's text (a JSON string when a schema is requested).
-      // `structured_output` is the already-parsed object when --json-schema is used.
-      const text = typeof parsed.result === "string" ? parsed.result : JSON.stringify(parsed.result ?? "");
-
-      let data: unknown;
-      if (req.schema) {
-        if (parsed.structured_output !== undefined) {
-          data = parsed.structured_output;
-        } else if (typeof parsed.result === "string") {
-          try {
-            data = JSON.parse(parsed.result);
-          } catch {
-            return err({ kind: "AdapterSpawn", adapter: "claude", cause: "result was not valid JSON for the requested schema" });
+      const onProgress = ctx.onProgress;
+      const onLine = onProgress
+        ? (line: string): void => {
+            for (const p of translateClaudeLine(line)) onProgress(p);
           }
-        } else if (parsed.result !== undefined && typeof parsed.result === "object") {
-          data = parsed.result;
-        } else {
-          return err({ kind: "AdapterSpawn", adapter: "claude", cause: "schema requested but no structured_output or JSON result present" });
-        }
+        : undefined;
+
+      const out = await deps.processRunner.run({
+        command: bin,
+        args,
+        cwd: req.cwd,
+        signal: req.signal,
+        ...(onLine ? { onLine } : {}),
+      });
+      if (out.code !== 0) {
+        return err({ kind: "AdapterSpawn", adapter: "claude", cause: out.stderr || `exit ${out.code}` });
+      }
+
+      const final = extractClaudeFinal(out.stdout);
+      if (final.isErr()) {
+        return err({ kind: "AdapterSpawn", adapter: "claude", cause: final.error });
+      }
+      const f = final.value;
+      if (req.schema && f.data === undefined) {
+        return err({ kind: "AdapterSpawn", adapter: "claude", cause: "schema requested but no structured_output or JSON result present" });
       }
 
       const result: AgentResult = {
-        text,
-        ...(data !== undefined ? { data } : {}),
-        usage: { inputTokens: parsed.usage?.input_tokens ?? 0, outputTokens: parsed.usage?.output_tokens ?? 0 },
+        text: f.text,
+        ...(f.data !== undefined ? { data: f.data } : {}),
+        usage: { inputTokens: f.usage.inputTokens, outputTokens: f.usage.outputTokens },
+        // Tools stream live via onProgress; the runtime emits agent-tool from those.
         toolCalls: [],
       };
       return ok(result);

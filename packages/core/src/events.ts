@@ -12,13 +12,14 @@ export interface AgentUsage {
 }
 
 export type WorkflowEvent =
-  | { readonly type: "run-started"; readonly runId: string; readonly name: string; readonly at: number }
+  | { readonly type: "run-started"; readonly runId: string; readonly name: string; readonly description?: string; readonly at: number }
   | { readonly type: "phase-started"; readonly phase: string; readonly at: number }
   | { readonly type: "agent-queued"; readonly key: string; readonly label: string; readonly phase: string; readonly prompt?: string; readonly at: number }
   | { readonly type: "agent-started"; readonly key: string; readonly at: number }
   | { readonly type: "agent-tool"; readonly key: string; readonly tool: ToolEvent; readonly at: number }
+  | { readonly type: "agent-progress"; readonly key: string; readonly tokens?: number; readonly model?: string; readonly at: number }
   | { readonly type: "agent-output"; readonly key: string; readonly chunk: string; readonly at: number }
-  | { readonly type: "agent-finished"; readonly key: string; readonly usage: AgentUsage; readonly cached: boolean; readonly at: number }
+  | { readonly type: "agent-finished"; readonly key: string; readonly usage: AgentUsage; readonly cached: boolean; readonly model?: string; readonly at: number }
   | { readonly type: "agent-failed"; readonly key: string; readonly error: WorkflowError; readonly at: number }
   | { readonly type: "log"; readonly message: string; readonly at: number }
   | { readonly type: "run-finished"; readonly runId: string; readonly at: number };
@@ -34,6 +35,14 @@ export interface AgentState {
   readonly status: AgentStatus;
   readonly tokens: number;
   readonly tools: readonly ToolEvent[];
+  /** Wall-clock start (from `agent-started`); absent until the agent runs. */
+  readonly startedAt?: number;
+  /** Wall-clock end (from `agent-finished`/`agent-failed`); absent while running. */
+  readonly endedAt?: number;
+  /** Raw model id reported by the harness stream, e.g. `claude-opus-4-8[1m]`. */
+  readonly model?: string;
+  /** Cumulative output tokens observed mid-run (from coalesced `agent-progress`). */
+  readonly liveTokens?: number;
 }
 
 export interface PhaseState {
@@ -52,6 +61,12 @@ export interface RunState {
   readonly agents: ReadonlyMap<string, AgentState>;
   readonly totalTokens: number;
   readonly logs: readonly string[];
+  /** The workflow's description (from `meta.description`), for the header subtitle. */
+  readonly description?: string;
+  /** Wall-clock start of the run (from `run-started`); drives the header clock. */
+  readonly startedAt?: number;
+  /** Wall-clock end of the run (from `run-finished`); freezes the header clock. */
+  readonly endedAt?: number;
 }
 
 export function initialRunState(): RunState {
@@ -80,7 +95,14 @@ function upsertPhase(
 export function reduce(state: RunState, event: WorkflowEvent): RunState {
   switch (event.type) {
     case "run-started":
-      return { ...state, runId: event.runId, name: event.name, status: "running" };
+      return {
+        ...state,
+        runId: event.runId,
+        name: event.name,
+        status: "running",
+        startedAt: event.at,
+        ...(event.description !== undefined ? { description: event.description } : {}),
+      };
     case "phase-started":
       return { ...state, phases: upsertPhase(state.phases, event.phase, (p) => p) };
     case "agent-queued": {
@@ -105,7 +127,8 @@ export function reduce(state: RunState, event: WorkflowEvent): RunState {
       const a = state.agents.get(event.key);
       if (!a) return state;
       const agents = new Map(state.agents);
-      agents.set(event.key, { ...a, status: "running" });
+      // Keep the original start across restarts so elapsed reads cumulatively.
+      agents.set(event.key, { ...a, status: "running", ...(a.startedAt === undefined ? { startedAt: event.at } : {}) });
       return {
         ...state,
         agents,
@@ -117,6 +140,17 @@ export function reduce(state: RunState, event: WorkflowEvent): RunState {
       if (!a) return state;
       const agents = new Map(state.agents);
       agents.set(event.key, { ...a, tools: [...a.tools, event.tool] });
+      return { ...state, agents };
+    }
+    case "agent-progress": {
+      const a = state.agents.get(event.key);
+      if (!a) return state;
+      const agents = new Map(state.agents);
+      agents.set(event.key, {
+        ...a,
+        ...(event.tokens !== undefined ? { liveTokens: event.tokens } : {}),
+        ...(event.model !== undefined ? { model: event.model } : {}),
+      });
       return { ...state, agents };
     }
     case "agent-output": {
@@ -131,7 +165,13 @@ export function reduce(state: RunState, event: WorkflowEvent): RunState {
       if (!a) return state;
       const tokens = event.usage.inputTokens + event.usage.outputTokens;
       const agents = new Map(state.agents);
-      agents.set(event.key, { ...a, status: "done", tokens });
+      agents.set(event.key, {
+        ...a,
+        status: "done",
+        tokens,
+        endedAt: event.at,
+        ...(event.model !== undefined ? { model: event.model } : {}),
+      });
       return {
         ...state,
         agents,
@@ -148,7 +188,7 @@ export function reduce(state: RunState, event: WorkflowEvent): RunState {
       const a = state.agents.get(event.key);
       if (!a) return state;
       const agents = new Map(state.agents);
-      agents.set(event.key, { ...a, status: "failed" });
+      agents.set(event.key, { ...a, status: "failed", endedAt: event.at });
       return {
         ...state,
         agents,
@@ -158,6 +198,6 @@ export function reduce(state: RunState, event: WorkflowEvent): RunState {
     case "log":
       return { ...state, logs: [...state.logs, event.message] };
     case "run-finished":
-      return { ...state, status: "finished" };
+      return { ...state, status: "finished", endedAt: event.at };
   }
 }

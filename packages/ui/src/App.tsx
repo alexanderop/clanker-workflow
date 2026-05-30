@@ -6,7 +6,8 @@ import { Header } from "./Header.js";
 import { PhasesColumn } from "./PhasesColumn.js";
 import { AgentsColumn } from "./AgentsColumn.js";
 import { DetailPane } from "./DetailPane.js";
-import { orderedPhases, agentsInPhase, detailLines, elapsedMs } from "./selectors.js";
+import { Footer } from "./Footer.js";
+import { orderedPhases, agentsInPhase, detailSections, runElapsedMs } from "./selectors.js";
 import { navReducer, initialNav, type NavState, type NavCtx } from "./navigation.js";
 
 export type UiAction =
@@ -21,13 +22,28 @@ export interface AppProps {
   readonly detailRows?: number;
   readonly onAction?: ((action: UiAction) => void) | undefined;
   readonly animate?: boolean;
+  /** Static clock override (ms) for deterministic tests; disables the live ticker. */
+  readonly now?: number | undefined;
 }
 
-export function App({ events, adapter, detailRows = 12, onAction, animate = true }: AppProps) {
+export function App({ events, adapter, detailRows = 12, onAction, animate = true, now: nowOverride }: AppProps) {
   const state: RunState = useMemo(() => events.reduce(reduce, initialRunState()), [events]);
 
   const [nav, setNav] = useState<NavState>(initialNav);
   const [frame, setFrame] = useState(0);
+  const [now, setNow] = useState(() => nowOverride ?? Date.now());
+
+  // Live ticker: bump the spinner frame + wall clock ~4×/sec while the run is active,
+  // so elapsed time visibly advances even when no events arrive (a long `claude -p`).
+  // The UI is a normal process — the sandbox's Date.now() ban only applies to the VM.
+  useEffect(() => {
+    if (nowOverride !== undefined || !animate || state.status !== "running") return;
+    const id = setInterval(() => {
+      setFrame((f) => f + 1);
+      setNow(Date.now());
+    }, 250);
+    return () => clearInterval(id);
+  }, [animate, state.status, nowOverride]);
 
   const phases = useMemo(() => orderedPhases(state), [state]);
   const selectedPhase = phases[Math.min(nav.phaseIndex, Math.max(0, phases.length - 1))];
@@ -36,7 +52,7 @@ export function App({ events, adapter, detailRows = 12, onAction, animate = true
     [state, selectedPhase],
   );
   const selectedAgent = agents[Math.min(nav.agentIndex, Math.max(0, agents.length - 1))];
-  const detailTotal = selectedAgent ? detailLines(selectedAgent).length : 1;
+  const detailTotal = selectedAgent ? detailSections(selectedAgent, now, nav.expanded).length : 1;
 
   // Latest values for the input handler, kept in refs to avoid stale closures.
   const ctxRef = useRef<NavCtx>({ phaseCount: 0, agentCount: 0, maxScroll: 0 });
@@ -50,17 +66,12 @@ export function App({ events, adapter, detailRows = 12, onAction, animate = true
   const selectedAgentKeyRef = useRef<string | undefined>(undefined);
   selectedAgentKeyRef.current = selectedAgent?.key;
 
-  useEffect(() => {
-    if (!animate) return;
-    const id = setInterval(() => setFrame((f) => f + 1), 120);
-    return () => clearInterval(id);
-  }, [animate]);
-
   useInput((input, key) => {
     if (key.upArrow) setNav((p) => navReducer(p, { type: "up" }, ctxRef.current));
     else if (key.downArrow) setNav((p) => navReducer(p, { type: "down" }, ctxRef.current));
     else if (key.rightArrow) setNav((p) => navReducer(p, { type: "right" }, ctxRef.current));
     else if (key.leftArrow) setNav((p) => navReducer(p, { type: "left" }, ctxRef.current));
+    else if (key.return) setNav((p) => navReducer(p, { type: "enter" }, ctxRef.current));
     else if (key.escape) setNav((p) => navReducer(p, { type: "esc" }, ctxRef.current));
     else if (input === "j") setNav((p) => navReducer(p, { type: "scrollDown" }, ctxRef.current));
     else if (input === "k") setNav((p) => navReducer(p, { type: "scrollUp" }, ctxRef.current));
@@ -77,7 +88,7 @@ export function App({ events, adapter, detailRows = 12, onAction, animate = true
 
   return (
     <Box flexDirection="column">
-      <Header state={state} elapsedMs={elapsedMs(events)} adapter={adapter} />
+      <Header state={state} elapsedMs={runElapsedMs(state, now)} adapter={adapter} />
       <Box>
         <PhasesColumn phases={phases} selectedIndex={nav.phaseIndex} focused={nav.focus === "phases"} frame={frame} />
         <AgentsColumn
@@ -86,9 +97,18 @@ export function App({ events, adapter, detailRows = 12, onAction, animate = true
           focused={nav.focus === "agents"}
           phaseTitle={selectedPhase?.title ?? ""}
           frame={frame}
+          now={now}
         />
-        <DetailPane agent={selectedAgent} scroll={nav.scroll} rows={detailRows} focused={nav.focus === "detail"} />
+        <DetailPane
+          agent={selectedAgent}
+          scroll={nav.scroll}
+          rows={detailRows}
+          focused={nav.focus === "detail"}
+          now={now}
+          expanded={nav.expanded}
+        />
       </Box>
+      <Footer focus={nav.focus} />
     </Box>
   );
 }

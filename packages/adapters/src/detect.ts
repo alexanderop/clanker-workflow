@@ -10,9 +10,11 @@ export interface Capabilities {
 }
 
 export const CAPABILITIES: Readonly<Record<AdapterId, Capabilities>> = {
-  claude: { nativeSchema: true, reportsTokens: true, toolEvents: false },
-  codex: { nativeSchema: true, reportsTokens: false, toolEvents: false },
-  copilot: { nativeSchema: false, reportsTokens: false, toolEvents: false },
+  // All three CLI adapters stream tool calls via their StreamTranslator. codex/copilot
+  // now report real token usage from their turn/result events (no longer approximate).
+  claude: { nativeSchema: true, reportsTokens: true, toolEvents: true },
+  codex: { nativeSchema: true, reportsTokens: true, toolEvents: true },
+  copilot: { nativeSchema: false, reportsTokens: true, toolEvents: true },
   "raw-api": { nativeSchema: true, reportsTokens: true, toolEvents: false },
 };
 

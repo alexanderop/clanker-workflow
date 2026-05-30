@@ -24,9 +24,10 @@ describe("App", () => {
     const frame = lastFrame() ?? "";
     expect(frame).toContain("deep-research");
     expect(frame).toContain("PHASES");
-    expect(frame).toContain("AGENTS");
     expect(frame).toContain("Scope 0/0");
     expect(frame).toContain("Search 1/1");
+    // Footer key hints are present at the list level.
+    expect(frame).toContain("select");
   });
 
   it("right-arrow focuses agents so the selected phase's agents show, then detail", async () => {
@@ -36,7 +37,7 @@ describe("App", () => {
     await tick();
     stdin.write(KEY.right); // focus agents
     await tick();
-    expect(lastFrame() ?? "").toContain("AGENTS (Search)");
+    expect(lastFrame() ?? "").toContain("Search");
     expect(lastFrame() ?? "").toContain("angle-0");
     stdin.write(KEY.right); // focus detail
     await tick();

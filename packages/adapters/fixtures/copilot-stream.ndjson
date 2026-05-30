@@ -1,0 +1,5 @@
+{"type":"session.created","session_id":"cs-1","model":"claude-sonnet-4-6"}
+{"type":"assistant.tool_call","name":"shell","arguments":{"command":"cat README.md"}}
+{"type":"assistant.message_delta","delta":"partial answer","usage":{"output_tokens":12}}
+{"type":"assistant.turn_end","usage":{"output_tokens":30}}
+{"type":"result","text":"{\"n\":7}","usage":{"input_tokens":900,"output_tokens":30}}

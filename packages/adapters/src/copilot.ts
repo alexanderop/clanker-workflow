@@ -5,6 +5,7 @@ import type { ProcessRunner } from "./process-runner.js";
 import { runWithSchemaRetry } from "./coercion.js";
 import { extractJson, compileJsonSchemaValidator } from "./json.js";
 import { CAPABILITIES } from "./detect.js";
+import { translateCopilotLine, extractCopilotFinal } from "./copilot-stream.js";
 
 export interface CopilotAdapterDeps {
   readonly processRunner: ProcessRunner;
@@ -18,9 +19,15 @@ export function createCopilotAdapter(deps: CopilotAdapterDeps): AgentRunner {
   return {
     id: "copilot",
     capabilities: CAPABILITIES.copilot,
-    run: async (req: AgentRequest, _ctx: RunCtx): Promise<Result<AgentResult, WorkflowError>> => {
+    run: async (req: AgentRequest, ctx: RunCtx): Promise<Result<AgentResult, WorkflowError>> => {
       let spawnError: WorkflowError | undefined;
       const validate = req.schema ? compileJsonSchemaValidator(req.schema) : undefined;
+      const onProgress = ctx.onProgress;
+      const onLine = onProgress
+        ? (line: string): void => {
+            for (const p of translateCopilotLine(line)) onProgress(p);
+          }
+        : undefined;
 
       let result: Awaited<ReturnType<typeof runWithSchemaRetry>>;
       try {
@@ -32,15 +39,28 @@ export function createCopilotAdapter(deps: CopilotAdapterDeps): AgentRunner {
               ? `\n\nRespond with ONLY a JSON value matching this JSON Schema:\n${JSON.stringify(req.schema)}`
               : "";
             const prompt = `${req.prompt}${schemaInstr}${hint ? `\n\n${hint}` : ""}`;
-            const args = ["-p", prompt, "--allow-all-tools", "--no-ask-user", "--silent", "-C", req.cwd];
+            // `--output-format json` streams events (live progress + final `result`).
+            const args = ["-p", prompt, "--output-format", "json", "--allow-all-tools", "--no-ask-user", "--silent", "-C", req.cwd];
             if (req.model) args.push("--model", req.model);
-            const out = await deps.processRunner.run({ command: bin, args, cwd: req.cwd, signal: req.signal });
+            const out = await deps.processRunner.run({
+              command: bin,
+              args,
+              cwd: req.cwd,
+              signal: req.signal,
+              ...(onLine ? { onLine } : {}),
+            });
             if (out.code !== 0) {
               spawnError = { kind: "AdapterSpawn", adapter: "copilot", cause: out.stderr || `exit ${out.code}` };
               throw new Error("copilot spawn failed");
             }
-            const data = req.schema ? extractJson(out.stdout) : undefined;
-            return { text: out.stdout, data, usage: { inputTokens: 0, outputTokens: Math.ceil(out.stdout.length / 4) } };
+            const finalRes = extractCopilotFinal(out.stdout);
+            if (finalRes.isErr()) {
+              spawnError = { kind: "AdapterSpawn", adapter: "copilot", cause: finalRes.error };
+              throw new Error("copilot stream parse failed");
+            }
+            const f = finalRes.value;
+            const data = req.schema ? extractJson(f.text) : undefined;
+            return { text: f.text, data, usage: { inputTokens: f.usage.inputTokens, outputTokens: f.usage.outputTokens } };
           },
         });
       } catch (e) {
@@ -52,7 +72,7 @@ export function createCopilotAdapter(deps: CopilotAdapterDeps): AgentRunner {
       return ok({
         text: r.text,
         ...(r.data !== undefined ? { data: r.data } : {}),
-        usage: { ...r.usage, approximate: true },
+        usage: r.usage,
         toolCalls: [],
       });
     },

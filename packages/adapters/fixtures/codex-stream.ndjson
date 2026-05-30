@@ -1,0 +1,6 @@
+{"type":"thread.started","thread_id":"th-1","model":"gpt-5-codex"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"type":"command_execution","command":"ls -la","status":"completed"}}
+{"type":"item.completed","item":{"type":"mcp_tool_call","server":"docs","tool":"search","arguments":{"query":"blog posts"},"status":"completed"}}
+{"type":"item.completed","item":{"type":"agent_message","text":"{\"n\":7}"}}
+{"type":"turn.completed","usage":{"input_tokens":3200,"output_tokens":18}}

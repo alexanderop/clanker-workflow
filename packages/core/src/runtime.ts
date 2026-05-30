@@ -4,7 +4,7 @@ import { createBudget, type Budget } from "./budget.js";
 import { WorkflowThrow, type WorkflowError } from "./errors.js";
 import type { Semaphore } from "./semaphore.js";
 import type { Journal } from "./journal.js";
-import type { AgentRequest, AgentRunner, WorkflowMeta } from "./types.js";
+import type { AgentProgress, AgentRequest, AgentRunner, WorkflowMeta } from "./types.js";
 import type { WorkflowEvent } from "./events.js";
 import type { ControlRegistry } from "./control.js";
 
@@ -58,6 +58,21 @@ export interface Runtime {
   workflow(name: string, args?: unknown): Promise<unknown>;
 }
 
+/**
+ * Default agent label: the prompt's first non-empty line, truncated — so unlabeled
+ * agents read like "Use the WebFetch tool (…" instead of "agent-3". The label is
+ * cosmetic (the journal keys resume by seq), so deriving it can't break replay.
+ */
+function deriveLabel(prompt: string, seq: number): string {
+  const firstLine = prompt
+    .split("\n")
+    .map((l) => l.trim())
+    .find((l) => l.length > 0);
+  if (firstLine === undefined) return `agent-${seq}`;
+  const max = 48;
+  return firstLine.length > max ? `${firstLine.slice(0, max - 1).trimEnd()}…` : firstLine;
+}
+
 export function createRuntime(deps: RuntimeDeps): Runtime {
   const budget = createBudget(deps.budgetTotal);
   let currentPhase = "default";
@@ -67,8 +82,37 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
   const agent = async (prompt: string, opts: AgentOptions = {}): Promise<unknown> => {
     const mySeq = seq++;
     const phase = opts.phase ?? currentPhase;
-    const label = opts.label ?? `agent-${mySeq}`;
+    const label = opts.label ?? deriveLabel(prompt, mySeq);
     const key = `${mySeq}:${phase}:${label}`;
+
+    // Live-progress sink handed to the adapter. Tool calls pass through immediately;
+    // token/model updates are coalesced to ≤1/sec per agent so a long run persists
+    // ~one progress line per second. Tokens are clamped monotonic (the final, real
+    // usage still arrives via agent-finished).
+    let lastProgressAt: number | undefined;
+    let lastTokens: number | undefined;
+    let lastModel: string | undefined;
+    const onProgress = (p: AgentProgress): void => {
+      if (p.tool) deps.emit({ type: "agent-tool", key, tool: p.tool, at: deps.now() });
+      let tokens = p.tokens;
+      if (tokens !== undefined) {
+        if (lastTokens !== undefined && tokens < lastTokens) tokens = lastTokens;
+        lastTokens = tokens;
+      }
+      if (p.model !== undefined) lastModel = p.model;
+      if (tokens === undefined && p.model === undefined) return; // tool-only: already emitted
+      const at = deps.now();
+      // Coalesce token/model updates to ≤1/sec; the very first update always passes.
+      if (lastProgressAt !== undefined && at - lastProgressAt < 1000) return;
+      lastProgressAt = at;
+      deps.emit({
+        type: "agent-progress",
+        key,
+        ...(tokens !== undefined ? { tokens } : {}),
+        ...(p.model !== undefined ? { model: p.model } : {}),
+        at,
+      });
+    };
 
     deps.emit({ type: "agent-queued", key, label, phase, prompt, at: deps.now() });
 
@@ -154,7 +198,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
               ...(opts.agentType ? { agentType: opts.agentType } : {}),
             };
             const runner = opts.adapter ? (deps.resolveRunner?.(opts.adapter) ?? deps.runner) : deps.runner;
-            const result = await runner.run(request, { runId: deps.runId, seq: mySeq });
+            const result = await runner.run(request, { runId: deps.runId, seq: mySeq, onProgress });
 
             if (result.isErr()) {
               if (restart) continue; // restartAgent: re-run with a fresh controller, same key/seq.
@@ -179,7 +223,14 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
             budget.record(res.usage.outputTokens);
             deps.journal.record({ seq: mySeq, key, text: res.text, data: res.data, outputTokens: res.usage.outputTokens });
             deps.emit({ type: "agent-output", key, chunk: res.text, at: deps.now() });
-            deps.emit({ type: "agent-finished", key, usage: res.usage, cached: false, at: deps.now() });
+            deps.emit({
+              type: "agent-finished",
+              key,
+              usage: res.usage,
+              cached: false,
+              ...(lastModel !== undefined ? { model: lastModel } : {}),
+              at: deps.now(),
+            });
             return value;
           } catch (e) {
             if (restart) continue; // restart requested even on a thrown error: re-run.

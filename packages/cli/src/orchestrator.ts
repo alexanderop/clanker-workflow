@@ -46,7 +46,13 @@ export interface RunResult {
  */
 export async function runWorkflow(deps: RunWorkflowDeps): Promise<Result<RunResult, WorkflowError>> {
   const loaded = loadWorkflow(deps.source);
-  deps.emit({ type: "run-started", runId: deps.runId, name: loaded.meta.name, at: deps.now() });
+  deps.emit({
+    type: "run-started",
+    runId: deps.runId,
+    name: loaded.meta.name,
+    ...(loaded.meta.description ? { description: loaded.meta.description } : {}),
+    at: deps.now(),
+  });
 
   // Seed the declared phases so the UI shows the full pipeline upfront, in order —
   // not just the phases the script has reached. A long `await` (e.g. parallel research)

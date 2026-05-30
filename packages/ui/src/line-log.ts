@@ -19,6 +19,7 @@ export function lineLogLine(event: WorkflowEvent): string | null {
     case "agent-queued":
     case "agent-output":
     case "agent-tool":
+    case "agent-progress":
       return null;
   }
 }

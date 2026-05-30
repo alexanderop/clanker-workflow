@@ -28,6 +28,35 @@ describe("createProcessRunner", () => {
     expect(out.code).toBe(0);
   }, 4000);
 
+  it("invokes onLine per complete stdout line, in order, and still buffers full stdout", async () => {
+    const runner = createProcessRunner();
+    const linesSeen: string[] = [];
+    const out = await runner.run({
+      command: process.execPath,
+      // Emit three lines over time; the last is newline-terminated.
+      args: ["-e", "const w=s=>process.stdout.write(s);w('a\\n');setTimeout(()=>w('b\\nc\\n'),10)"],
+      cwd: process.cwd(),
+      signal: new AbortController().signal,
+      onLine: (line) => linesSeen.push(line),
+    });
+    expect(linesSeen).toEqual(["a", "b", "c"]);
+    expect(out.stdout).toBe("a\nb\nc\n");
+  });
+
+  it("flushes a trailing partial (non-newline-terminated) line via onLine", async () => {
+    const runner = createProcessRunner();
+    const linesSeen: string[] = [];
+    const out = await runner.run({
+      command: process.execPath,
+      args: ["-e", "process.stdout.write('partial')"],
+      cwd: process.cwd(),
+      signal: new AbortController().signal,
+      onLine: (line) => linesSeen.push(line),
+    });
+    expect(linesSeen).toEqual(["partial"]);
+    expect(out.stdout).toBe("partial");
+  });
+
   it("forwards stdin", async () => {
     const runner = createProcessRunner();
     const out = await runner.run({

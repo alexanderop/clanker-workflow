@@ -18,7 +18,16 @@ export function createFakeProcessRunner(
       recorded.push(spec);
       const r = responses[spec.command];
       const resolved = typeof r === "function" ? r(spec) : (r ?? {});
-      return { code: resolved.code ?? 0, stdout: resolved.stdout ?? "", stderr: resolved.stderr ?? "" };
+      const stdout = resolved.stdout ?? "";
+      // Mirror the real runner's line streaming so adapters exercising `onLine`
+      // (StreamTranslators) behave identically against the fake.
+      if (spec.onLine && stdout.length > 0) {
+        const lines = stdout.split("\n");
+        const trailing = lines.pop() ?? "";
+        for (const line of lines) spec.onLine(line);
+        if (trailing.length > 0) spec.onLine(trailing);
+      }
+      return { code: resolved.code ?? 0, stdout, stderr: resolved.stderr ?? "" };
     },
     calls: () => recorded,
   };

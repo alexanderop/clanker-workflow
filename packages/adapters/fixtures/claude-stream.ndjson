@@ -1,0 +1,8 @@
+{"type":"system","subtype":"init","model":"claude-opus-4-8[1m]","tools":["WebFetch"],"session_id":"sess-1"}
+{"type":"assistant","message":{"id":"msg_1","model":"claude-opus-4-8[1m]","content":[{"type":"text","text":"Let me fetch the blog index."}],"usage":{"input_tokens":1200,"output_tokens":40}}}
+{"type":"assistant","message":{"id":"msg_2","model":"claude-opus-4-8[1m]","content":[{"type":"tool_use","id":"tu_1","name":"WebFetch","input":{"url":"https://alexop.dev","prompt":"List all blog posts with titles, URLs and dates"}}],"usage":{"input_tokens":1200,"output_tokens":80}}}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tu_1","content":"index html"}]}}
+{"type":"rate_limit_event","tier":"standard"}
+{"type":"assistant","message":{"id":"msg_3","model":"claude-opus-4-8[1m]","content":[{"type":"tool_use","id":"tu_2","name":"WebFetch","input":{"url":"https://alexop.dev/archive","prompt":"List EVERY post published in May 2026"}}],"usage":{"input_tokens":1200,"output_tokens":150}}}
+{"type":"hook_started","hook":"PostToolUse"}
+{"type":"result","subtype":"success","is_error":false,"result":"{\"n\": 7}","structured_output":{"n":7},"usage":{"input_tokens":10406,"output_tokens":106}}

@@ -6,6 +6,7 @@ import { join } from "node:path";
 import type { AgentRunner, AgentRequest, AgentResult, RunCtx, WorkflowError } from "@workflow/core";
 import type { ProcessRunner } from "./process-runner.js";
 import { CAPABILITIES } from "./detect.js";
+import { translateCodexLine, extractCodexUsage } from "./codex-stream.js";
 
 export interface FileStore {
   writeTemp(name: string, content: string): Promise<string>;
@@ -40,14 +41,15 @@ export function createCodexAdapter(deps: CodexAdapterDeps): AgentRunner {
   return {
     id: "codex",
     capabilities: CAPABILITIES.codex,
-    run: async (req: AgentRequest, _ctx: RunCtx): Promise<Result<AgentResult, WorkflowError>> => {
+    run: async (req: AgentRequest, ctx: RunCtx): Promise<Result<AgentResult, WorkflowError>> => {
       const created: string[] = [];
       const outPath = await fileStore.writeTemp("codex-out.txt", "");
       created.push(outPath);
-      // YOLO mode: `--full-auto` sandboxes execution (no network), which blocks
-      // web research. Bypass approvals and the sandbox so headless agents get full
-      // access — the workflow run is already gated by the CLI consent prompt.
-      const args = ["exec", "--skip-git-repo-check", "-C", req.cwd, "--dangerously-bypass-approvals-and-sandbox", "-o", outPath];
+      // `--json` streams events to stdout (live progress) while `-o` writes the final
+      // assistant message to a file (authoritative result/schema source). YOLO mode:
+      // `--full-auto` sandboxes execution (no network), which blocks web research, so
+      // bypass approvals and the sandbox — the run is already gated by the consent prompt.
+      const args = ["exec", "--json", "--skip-git-repo-check", "-C", req.cwd, "--dangerously-bypass-approvals-and-sandbox", "-o", outPath];
       if (req.schema) {
         const schemaPath = await fileStore.writeTemp("codex-schema.json", JSON.stringify(req.schema));
         created.push(schemaPath);
@@ -56,8 +58,21 @@ export function createCodexAdapter(deps: CodexAdapterDeps): AgentRunner {
       if (req.model) args.push("-m", req.model);
       args.push(req.prompt);
 
+      const onProgress = ctx.onProgress;
+      const onLine = onProgress
+        ? (line: string): void => {
+            for (const p of translateCodexLine(line)) onProgress(p);
+          }
+        : undefined;
+
       try {
-        const out = await deps.processRunner.run({ command: bin, args, cwd: req.cwd, signal: req.signal });
+        const out = await deps.processRunner.run({
+          command: bin,
+          args,
+          cwd: req.cwd,
+          signal: req.signal,
+          ...(onLine ? { onLine } : {}),
+        });
         if (out.code !== 0) {
           return err({ kind: "AdapterSpawn", adapter: "codex", cause: out.stderr || `exit ${out.code}` });
         }
@@ -70,11 +85,16 @@ export function createCodexAdapter(deps: CodexAdapterDeps): AgentRunner {
             return err({ kind: "AdapterSpawn", adapter: "codex", cause: "final message was not valid JSON for the schema" });
           }
         }
-        const outputTokens = Math.ceil(finalMessage.length / 4);
+        // Prefer real usage from the stream's terminal `turn.completed`; fall back to a
+        // char-count estimate only when the stream carried no usage.
+        const realUsage = extractCodexUsage(out.stdout);
+        const usage = realUsage
+          ? { inputTokens: realUsage.inputTokens, outputTokens: realUsage.outputTokens }
+          : { inputTokens: 0, outputTokens: Math.ceil(finalMessage.length / 4), approximate: true };
         const result: AgentResult = {
           text: finalMessage,
           ...(data !== undefined ? { data } : {}),
-          usage: { inputTokens: 0, outputTokens, approximate: true },
+          usage,
           toolCalls: [],
         };
         return ok(result);
